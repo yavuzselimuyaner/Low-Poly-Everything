@@ -353,6 +353,24 @@ class PS13DEngine:
             filtered_boxes.append((bx, by, bw, bh))
         merged_boxes = filtered_boxes if filtered_boxes else merged_boxes[:1]
 
+        # Reject vertically stacked false positive boxes located in torso/chest beneath a higher face
+        final_boxes = []
+        for i, b1 in enumerate(merged_boxes):
+            bx1, by1, bw1, bh1 = b1
+            is_torso_duplicate = False
+            for j, b2 in enumerate(merged_boxes):
+                if i != j:
+                    bx2, by2, bw2, bh2 = b2
+                    # If b2 is above b1 and horizontally aligned (same body column)
+                    if by2 < by1 and (by1 > by2 + bh2 * 0.70):
+                        overlap_x = max(0, min(bx1 + bw1, bx2 + bw2) - max(bx1, bx2))
+                        if overlap_x > min(bw1, bw2) * 0.50:
+                            is_torso_duplicate = True
+                            break
+            if not is_torso_duplicate:
+                final_boxes.append(b1)
+        merged_boxes = final_boxes if final_boxes else merged_boxes[:1]
+
         for bx, by, bw, bh in merged_boxes:
             roi_h = int(round(bh * 0.62))
             face_roi = det_gray_eq[by : by + roi_h, bx : bx + bw]
@@ -720,6 +738,15 @@ class PS13DEngine:
         gc_mask[depth >= thresh_val] = cv2.GC_PR_FGD
         gc_mask[depth >= min(0.92, thresh_val + 0.16)] = cv2.GC_FGD
 
+        # If image corners indicate a solid background cutout (e.g. pure white or dark backdrop),
+        # seed known background pixels to cleanly detach limbs and prevent floor bridging
+        tl_corner = img_rgb[0, 0].astype(np.float32)
+        tr_corner = img_rgb[0, -1].astype(np.float32)
+        if np.linalg.norm(tl_corner - tr_corner) < 15.0 and (np.all(tl_corner > 235) or np.all(tl_corner < 20)):
+            bg_target = 0.5 * (tl_corner + tr_corner)
+            color_dist = np.linalg.norm(img_rgb.astype(np.float32) - bg_target, axis=-1)
+            gc_mask[color_dist < 20.0] = cv2.GC_BGD
+
         # Seed strict inner core of detected faces (nose/eyes/mouth) as definite foreground so GrabCut
         # never notches cheeks, while letting outer jaw/ear edges snap tightly to true silhouette boundaries!
         for face in faces:
@@ -744,24 +771,41 @@ class PS13DEngine:
         refined = cv2.morphologyEx(refined, cv2.MORPH_CLOSE, kernel)
         refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
 
-        contours, _ = cv2.findContours(refined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+        contours, hierarchy = cv2.findContours(refined, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours or hierarchy is None:
             return None, None
 
         min_area = 0.04 * (h * w)
-        valid_contours = [c for c in contours if cv2.contourArea(c) >= min_area]
-        if not valid_contours:
+        min_hole_area = max(16, int(0.002 * (h * w)))
+
+        valid_ext_indices = [
+            i for i in range(len(contours))
+            if hierarchy[0][i][3] == -1 and cv2.contourArea(contours[i]) >= min_area
+        ]
+        if not valid_ext_indices:
             return None, None
 
         poly_mask = np.zeros((h, w), dtype=np.uint8)
         poly_list = []
-        for cnt in valid_contours:
+        for i in valid_ext_indices:
+            cnt = contours[i]
             peri = cv2.arcLength(cnt, True)
             eps = cfg.silhouette_simplify * peri
             approx = cv2.approxPolyDP(cnt, eps, True)
             if len(approx) >= 4:
                 cv2.fillPoly(poly_mask, [approx], 255)
                 poly_list.append(approx.reshape(-1, 2))
+
+        # Carve out interior negative-space holes (e.g. between legs, between bent arms and torso)
+        for i in range(len(contours)):
+            parent_idx = hierarchy[0][i][3]
+            if parent_idx in valid_ext_indices and cv2.contourArea(contours[i]) >= min_hole_area:
+                peri = cv2.arcLength(contours[i], True)
+                eps = max(1.5, cfg.silhouette_simplify * peri)
+                approx = cv2.approxPolyDP(contours[i], eps, True)
+                if len(approx) >= 3:
+                    cv2.fillPoly(poly_mask, [approx], 0)
+                    poly_list.append(approx.reshape(-1, 2))
 
         if not poly_list:
             return None, None
