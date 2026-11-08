@@ -12,7 +12,14 @@
 *.heic
 *.avif
 
+# Whitelist README showcase images
+!gallery_working_well.png
+!gallery_open_challenges.png
+!foto2.jpg
+!2.png
+
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
+

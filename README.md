@@ -18,7 +18,11 @@ Inspired by the iconic visual style of late-90s classics:
 
 ---
 
-## 📸 Before & After
+## 📸 Showcase: Well-Working Scenarios (Portraits & Isolated Subjects)
+
+Below are side-by-side comparisons demonstrating where the engine achieves its authentic 1998 PS1 vision: crisp facial landmarks, flat 2D backdrop plates (no background wall triangles), and chunky low-poly character meshes.
+
+![PS1 3D Engine - Well Working Cases](gallery_working_well.png)
 
 | Input Photo | Reconstructed PS1 3D Output (`2.png`) |
 | :---: | :---: |
@@ -141,7 +145,9 @@ python ps1_3d_engine.py my_photo.jpg -o ps1_render.png --polys 350 --flatness 0.
 
 ## 🌟 Open Challenges & Community Roadmap (Help Wanted!)
 
-We welcome open-source contributions from computer graphics, computer vision, and retro-gaming enthusiasts! Below are the key technical challenges currently being researched:
+We welcome open-source contributions from computer graphics, computer vision, and retro-gaming enthusiasts! Below is a visual summary of the active geometric artifacts and open challenges:
+
+![PS1 3D Engine - Open Challenges and Known Artifacts](gallery_open_challenges.png)
 
 ### 1. Negative Space Triangulation & Limbs Separation ("Wing/Cape" Prevention)
 - **Problem**: When a subject poses with crossed arms, outstretched limbs, or hand props (e.g. pistols), Delaunay triangulation operates over the outer convex hull of the vertices and can bridge triangles across the empty negative space between the arms and torso.
