@@ -10,7 +10,6 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import torch
-from PIL import Image
 from scipy.spatial import Delaunay
 
 
@@ -32,107 +31,116 @@ PS1_BAYER_4X4 = (
 
 @dataclass
 class PS1Config:
-    """Configuration for authentic PS1 low-poly 3D reconstruction & hardware rendering."""
+    """Configuration for authentic PS1 low-poly 3D subject reconstruction & 2D pre-rendered backdrop."""
 
-    scene_mode: str = "full_scene"      # "full_scene" (default continuous mesh) or "isolated_subject"
-    poly_count: int = 440               # Target triangle count for chunky PS1 3D mesh
-    native_short_side: int = 240        # Authentic PS1 240p resolution along the shorter image dimension
-    upscale_factor: int = 3             # Integer nearest-neighbor upscale (e.g. 240p * 3 = 720p)
-    tex_resolution: int = 128           # Unified PS1 VRAM texture page resolution (short side)
-    head_tex_resolution: int = 128      # Retained for CLI/UI backwards compatibility (unified pass used)
-    clut_colors: int = 28               # Colors in foreground PS1 CLUT palette (8..48)
-    head_clut_colors: int = 28          # Retained for backwards compatibility
-    bg_clut_colors: int = 20            # Colors in background/sky CLUT palette
-    facet_flatness: float = 0.50        # Body/clothing flatness blend (0.45..0.55 for blocky PS1 facets)
-    face_preservation: float = 0.95     # [0.0..1.0] Keeps face local_flatness <= 0.08 so features stay readable
-    lighting_strength: float = 0.58     # Strong 3D facet normal lighting contrast on body/limbs
-    crease_strength: float = 0.30       # Dihedral polygon fold darkening (0.25..0.35 for sharp jacket/limb folds)
-    silhouette_simplify: float = 0.012  # Chunky polygonal silhouette coarseness
-    camera_yaw_deg: float = 0.7         # Subtle 3D perspective yaw (attenuated on depth cliffs)
-    depth_scale: float = 24.0           # 3D Z relief extrusion scale in native 240p space
-    vertex_snap: float = 1.0            # PS1 GTE integer screen-space grid snap (in 240p pixels)
-    dither_strength: float = 10.0       # Hardware 4x4 Bayer dithering spread before RGB555
-    fog_strength: float = 0.22          # Smooth scalar depth fog on distant background (depth < 0.35)
-    scanlines: bool = True              # Subtle CRT scanline pass aligned to native 240p rows
-    seed: int = 42                      # Deterministic seed for reproducible meshes
+    scene_mode: str = "isolated_subject"  # "isolated_subject" (default: 3D subject over flat 2D PS1 backdrop) or "full_scene"
+    poly_count: int = 440                 # Target triangle count for the 3D subject mesh
+    native_short_side: int = 240          # Authentic PS1 240p resolution along the shorter image dimension
+    upscale_factor: int = 3               # Integer nearest-neighbor upscale (e.g. 240p * 3 = 720p)
+    tex_resolution: int = 96              # PS1 VRAM body/subject texture page resolution (short side)
+    head_tex_resolution: int = 72         # Dedicated PS1 VRAM texture page resolution per detected head/face
+    clut_colors: int = 22                 # Colors in foreground subject PS1 CLUT palette (16..32)
+    head_clut_colors: int = 24            # Dedicated colors in head/face PS1 CLUT palette
+    bg_clut_colors: int = 16              # Colors in static 2D background backdrop CLUT palette
+    facet_flatness: float = 0.45          # Body/clothing flatness blend (face prioritizes crisp CLUT texture)
+    face_preservation: float = 0.96       # [0.0..1.0] Preserves crisp affine CLUT texture & gentle shading on faces
+    face_flatness_max: float = 0.04       # Max flat-color blend on face/head so eyes/lips/stubble stay readable
+    lighting_strength: float = 0.52       # 3D facet normal lighting contrast on the subject mesh
+    crease_strength: float = 0.18         # Darkening along sharp 3D dihedral polygon folds on clothing/body
+    silhouette_simplify: float = 0.009    # Polygonal silhouette coarseness (higher = chunkier low-poly outline)
+    camera_yaw_deg: float = 1.2           # Subtle 3D perspective yaw on the subject (tamed to prevent shearing)
+    depth_scale: float = 28.0             # Tamed 3D Z relief extrusion scale in native 240p space
+    vertex_snap: float = 1.0              # PS1 GTE integer screen-space grid snap (in 240p pixels)
+    dither_strength: float = 11.0         # Hardware 4x4 Bayer dithering spread before RGB555
+    fog_strength: float = 0.28            # Atmospheric PS1 depth fog on the static 2D backdrop
+    scanlines: bool = True                # Subtle CRT scanline pass aligned to native 240p rows
+    seed: int = 42                        # Deterministic seed for reproducible meshes
 
 
 PRESETS: Dict[str, PS1Config] = {
     "mgs1": PS1Config(
-        scene_mode="full_scene",
-        poly_count=440,
+        scene_mode="isolated_subject",
+        poly_count=420,
         native_short_side=240,
-        tex_resolution=128,
-        head_tex_resolution=128,
-        clut_colors=28,
-        head_clut_colors=28,
-        bg_clut_colors=20,
-        facet_flatness=0.50,
-        face_preservation=0.95,
-        lighting_strength=0.58,
-        crease_strength=0.30,
-        camera_yaw_deg=0.7,
-        depth_scale=24.0,
-        dither_strength=10.0,
-        fog_strength=0.22,
+        tex_resolution=92,
+        head_tex_resolution=70,
+        clut_colors=22,
+        head_clut_colors=24,
+        bg_clut_colors=16,
+        facet_flatness=0.48,
+        face_preservation=0.96,
+        face_flatness_max=0.04,
+        lighting_strength=0.56,
+        crease_strength=0.20,
+        silhouette_simplify=0.0105,
+        camera_yaw_deg=1.2,
+        depth_scale=28.0,
+        dither_strength=11.0,
+        fog_strength=0.28,
         scanlines=True,
     ),
     "balanced": PS1Config(
-        scene_mode="full_scene",
-        poly_count=480,
+        scene_mode="isolated_subject",
+        poly_count=460,
         native_short_side=240,
-        tex_resolution=132,
-        head_tex_resolution=132,
-        clut_colors=28,
-        head_clut_colors=28,
-        bg_clut_colors=20,
-        facet_flatness=0.46,
+        tex_resolution=104,
+        head_tex_resolution=72,
+        clut_colors=24,
+        head_clut_colors=24,
+        bg_clut_colors=16,
+        facet_flatness=0.42,
         face_preservation=0.96,
-        lighting_strength=0.54,
-        crease_strength=0.26,
-        camera_yaw_deg=0.6,
-        depth_scale=22.0,
-        dither_strength=9.5,
-        fog_strength=0.20,
-        scanlines=True,
-    ),
-    "ultra_lowpoly": PS1Config(
-        scene_mode="full_scene",
-        poly_count=280,
-        native_short_side=216,
-        tex_resolution=96,
-        head_tex_resolution=96,
-        clut_colors=20,
-        head_clut_colors=20,
-        bg_clut_colors=14,
-        facet_flatness=0.55,
-        face_preservation=0.93,
-        lighting_strength=0.64,
-        crease_strength=0.35,
-        camera_yaw_deg=0.9,
-        depth_scale=26.0,
-        vertex_snap=1.0,
-        dither_strength=11.5,
+        face_flatness_max=0.04,
+        lighting_strength=0.50,
+        crease_strength=0.18,
+        silhouette_simplify=0.0085,
+        camera_yaw_deg=1.2,
+        depth_scale=28.0,
+        dither_strength=10.5,
         fog_strength=0.26,
         scanlines=True,
     ),
+    "ultra_lowpoly": PS1Config(
+        scene_mode="isolated_subject",
+        poly_count=260,
+        native_short_side=216,
+        tex_resolution=68,
+        head_tex_resolution=58,
+        clut_colors=16,
+        head_clut_colors=20,
+        bg_clut_colors=14,
+        facet_flatness=0.56,
+        face_preservation=0.94,
+        face_flatness_max=0.06,
+        lighting_strength=0.58,
+        crease_strength=0.22,
+        silhouette_simplify=0.013,
+        camera_yaw_deg=1.4,
+        depth_scale=30.0,
+        vertex_snap=1.0,
+        dither_strength=12.0,
+        fog_strength=0.32,
+        scanlines=True,
+    ),
     "detailed": PS1Config(
-        scene_mode="full_scene",
-        poly_count=680,
+        scene_mode="isolated_subject",
+        poly_count=780,
         native_short_side=256,
-        tex_resolution=144,
-        head_tex_resolution=144,
+        tex_resolution=128,
+        head_tex_resolution=88,
         clut_colors=32,
-        head_clut_colors=32,
-        bg_clut_colors=24,
-        facet_flatness=0.45,
-        face_preservation=0.97,
-        lighting_strength=0.48,
-        crease_strength=0.25,
-        camera_yaw_deg=0.5,
-        depth_scale=20.0,
-        dither_strength=8.5,
-        fog_strength=0.16,
+        head_clut_colors=28,
+        bg_clut_colors=20,
+        facet_flatness=0.28,
+        face_preservation=0.98,
+        face_flatness_max=0.02,
+        lighting_strength=0.42,
+        crease_strength=0.12,
+        silhouette_simplify=0.006,
+        camera_yaw_deg=1.0,
+        depth_scale=24.0,
+        dither_strength=9.5,
+        fog_strength=0.20,
         scanlines=False,
     ),
 }
@@ -140,12 +148,11 @@ PRESETS: Dict[str, PS1Config] = {
 
 @dataclass
 class FaceRegion:
-    """Detected face/head box, subject torso box, & anatomical feature anchors in native 240p coordinates."""
+    """Detected face box & anatomical feature anchors in native 240p coordinates."""
 
-    box: Tuple[int, int, int, int]                    # (fx, fy, fw, fh) face box in native coordinates
-    head_box: Tuple[int, int, int, int]               # Expanded head+hair+ears box (hx1, hy1, hx2, hy2)
-    body_box: Tuple[int, int, int, int]               # Estimated torso/clothing box below head (bx1, by1, bx2, by2)
-    landmarks: np.ndarray                             # Structured (K, 2) anatomical PS1 head + silhouette cage vertices
+    box: Tuple[int, int, int, int]       # (fx, fy, fw, fh) in native coordinates
+    head_box: Tuple[int, int, int, int]  # Expanded head+hair+chin box (hx1, hy1, hx2, hy2)
+    landmarks: np.ndarray                # Structured (K, 2) anatomical PS1 head cage vertices
     eye_mouth_boxes: List[Tuple[int, int, int, int]]  # Protected zones (no random clutter vertices inside)
 
 
@@ -181,26 +188,30 @@ def _install_timm_fallback_if_missing() -> None:
 
 
 def ensure_rgb_uint8(img: np.ndarray) -> np.ndarray:
-    """Normalizes any input image array (grayscale, RGBA, float, uint16) to a clean 3-channel uint8 RGB array."""
+    """Normalizes arbitrary grayscale/RGBA/uint16/float images into standard HxWx3 uint8 RGB."""
     if img is None:
         raise ValueError("Input image is None.")
     arr = np.asarray(img)
     if arr.ndim == 2:
-        arr = np.stack([arr, arr, arr], axis=-1)
+        arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
     elif arr.ndim == 3 and arr.shape[2] == 4:
         alpha = arr[:, :, 3:4].astype(np.float32) / 255.0
-        bg = np.full_like(arr[:, :, :3], 36, dtype=np.float32)
-        arr = np.clip(arr[:, :, :3].astype(np.float32) * alpha + bg * (1.0 - alpha), 0, 255).astype(np.uint8)
+        rgb = arr[:, :, :3].astype(np.float32)
+        bg = np.full_like(rgb, 32.0)
+        arr = (rgb * alpha + bg * (1.0 - alpha)).astype(np.uint8)
     elif arr.ndim == 3 and arr.shape[2] == 1:
         arr = np.repeat(arr, 3, axis=2)
 
     if arr.dtype != np.uint8:
-        if np.issubdtype(arr.dtype, np.floating) and arr.max() <= 1.05:
-            arr = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
+        if np.issubdtype(arr.dtype, np.floating):
+            max_v = float(np.nanmax(arr)) if arr.size > 0 else 1.0
+            if max_v <= 1.05:
+                arr = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
+            else:
+                arr = np.clip(arr, 0, 255).astype(np.uint8)
         else:
             arr = np.clip(arr, 0, 255).astype(np.uint8)
-
-    return np.ascontiguousarray(arr[:, :, :3])
+    return arr
 
 
 class PS13DEngine:
@@ -211,52 +222,14 @@ class PS13DEngine:
             self.device = torch.device(device)
 
         _install_timm_fallback_if_missing()
-        (
-            self.depth_backend,
-            self.depth_model,
-            self.depth_processor,
-            self.midas,
-            self.transform,
-        ) = self._load_depth_model()
+        self.midas, self.transform = self._load_midas_model()
 
+        # Built-in OpenCV Haar cascades for fast offline face & eye landmark detection
         haar_dir = cv2.data.haarcascades
         self.face_cascade_alt2 = cv2.CascadeClassifier(os.path.join(haar_dir, "haarcascade_frontalface_alt2.xml"))
         self.face_cascade_def = cv2.CascadeClassifier(os.path.join(haar_dir, "haarcascade_frontalface_default.xml"))
         self.profile_cascade = cv2.CascadeClassifier(os.path.join(haar_dir, "haarcascade_profileface.xml"))
         self.eye_cascade = cv2.CascadeClassifier(os.path.join(haar_dir, "haarcascade_eye.xml"))
-
-    def _load_depth_model(self):
-        """
-        Loads the depth estimation backend.
-        Primary: Depth-Anything-V2-Small via Hugging Face transformers (sharp boundaries around limbs, hands, props).
-        Automatic Fallback: MiDaS (intel-isl/MiDaS DPT_Hybrid or MiDaS_small).
-        """
-        # Patch huggingface-hub version metadata for transformers compatibility
-        try:
-            import importlib.metadata
-            orig_meta = importlib.metadata.version
-            importlib.metadata.version = lambda pkg: "0.35.0" if pkg == "huggingface-hub" else orig_meta(pkg)
-        except Exception:
-            pass
-
-        try:
-            from transformers import AutoImageProcessor, AutoModelForDepthEstimation
-            print("Attempting to load Depth-Anything-V2-Small model...")
-            model_id = "depth-anything/Depth-Anything-V2-Small-hf"
-            try:
-                proc = AutoImageProcessor.from_pretrained(model_id, local_files_only=True)
-                model = AutoModelForDepthEstimation.from_pretrained(model_id, local_files_only=True).to(self.device).eval()
-            except Exception:
-                proc = AutoImageProcessor.from_pretrained(model_id)
-                model = AutoModelForDepthEstimation.from_pretrained(model_id).to(self.device).eval()
-            print("Successfully loaded Depth-Anything-V2-Small depth model.")
-            return "depth_anything_v2", model, proc, None, None
-        except Exception as e:
-            print(f"Depth-Anything-V2 not available ({e}). Falling back to MiDaS...")
-
-        # Fallback to MiDaS
-        midas, transform = self._load_midas_model()
-        return "midas", None, None, midas, transform
 
     def _load_midas_model(self):
         hub_dir = torch.hub.get_dir()
@@ -287,53 +260,41 @@ class PS13DEngine:
 
     def compute_depth(self, img_rgb: np.ndarray) -> np.ndarray:
         """Returns normalized inverse depth in [0, 1] (1.0 = closest foreground, 0.0 = farthest background)."""
-        if self.depth_backend == "depth_anything_v2":
-            pil_img = Image.fromarray(img_rgb)
-            inputs = self.depth_processor(images=pil_img, return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                outputs = self.depth_model(**inputs)
-                post = self.depth_processor.post_process_depth_estimation(outputs, target_sizes=[img_rgb.shape[:2]])
-                d = post[0]["predicted_depth"].cpu().numpy().astype(np.float32)
-            p_low, p_high = np.percentile(d, [1.0, 99.5])
-            depth = np.clip((d - p_low) / (p_high - p_low + 1e-6), 0.0, 1.0).astype(np.float32)
-            return depth
-        else:
-            input_batch = self.transform(img_rgb).to(self.device)
-            with torch.no_grad():
-                prediction = self.midas(input_batch)
-                prediction = torch.nn.functional.interpolate(
-                    prediction.unsqueeze(1),
-                    size=img_rgb.shape[:2],
-                    mode="bicubic",
-                    align_corners=False,
-                ).squeeze()
-            depth = prediction.cpu().numpy().astype(np.float32)
-            p_low, p_high = np.percentile(depth, [1.0, 99.5])
-            depth = np.clip((depth - p_low) / (p_high - p_low + 1e-6), 0.0, 1.0).astype(np.float32)
-            return depth
+        input_batch = self.transform(img_rgb).to(self.device)
+        with torch.no_grad():
+            prediction = self.midas(input_batch)
+            prediction = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1),
+                size=img_rgb.shape[:2],
+                mode="bicubic",
+                align_corners=False,
+            ).squeeze()
+        depth = prediction.cpu().numpy().astype(np.float32)
+        p_low, p_high = np.percentile(depth, [1.0, 99.5])
+        depth = np.clip((depth - p_low) / (p_high - p_low + 1e-6), 0.0, 1.0).astype(np.float32)
+        return depth
 
     def detect_faces_and_landmarks(
         self, orig_rgb: np.ndarray, full_depth: np.ndarray, ps1_w: int, ps1_h: int
     ) -> List[FaceRegion]:
         """
-        Detects faces across close-up portraits, half-body shots, and full-body outdoor photos (down to 5% of image size),
-        validates against foreground depth, and builds a complete PS1 anatomical head cage + outer hair/ear protective ring
-        so continuous full-scene triangulation never slices sky facets into the head.
+        Detects faces on the full-resolution image, validates against foreground depth, refines eye/brow/mouth
+        heights, and constructs a clean, symmetrical PS1 anatomical head cage in native 240p coordinates.
         """
         orig_h, orig_w = orig_rgb.shape[:2]
-        det_scale = min(1.0, 760.0 / float(min(orig_h, orig_w)))
+        det_scale = min(1.0, 640.0 / float(min(orig_h, orig_w)))
         det_w = max(64, int(round(orig_w * det_scale)))
         det_h = max(64, int(round(orig_h * det_scale)))
         det_gray = cv2.cvtColor(cv2.resize(orig_rgb, (det_w, det_h), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY)
         det_gray_eq = cv2.equalizeHist(det_gray)
 
-        min_face = max(18, int(round(min(det_w, det_h) * 0.05)))
+        min_face = max(28, int(round(min(det_w, det_h) * 0.14)))
         raw_boxes = []
         for gray_src in (det_gray, det_gray_eq):
             for cascade, scale_f, min_n in (
-                (self.face_cascade_alt2, 1.05, 3),
-                (self.face_cascade_def, 1.07, 4),
-                (self.profile_cascade, 1.07, 4),
+                (self.face_cascade_alt2, 1.06, 3),
+                (self.face_cascade_def, 1.08, 4),
+                (self.profile_cascade, 1.08, 4),
             ):
                 if cascade.empty():
                     continue
@@ -347,7 +308,6 @@ class PS13DEngine:
             return []
 
         raw_boxes.sort(key=lambda b: b[2] * b[3], reverse=True)
-        max_area = float(raw_boxes[0][2] * raw_boxes[0][3])
         merged_boxes = []
         for bx, by, bw, bh in raw_boxes:
             ox1 = int(np.clip(bx / det_scale, 0, orig_w - 1))
@@ -355,7 +315,6 @@ class PS13DEngine:
             ox2 = int(np.clip((bx + bw) / det_scale, ox1 + 1, orig_w))
             oy2 = int(np.clip((by + bh) / det_scale, oy1 + 1, orig_h))
             patch_depth = float(np.median(full_depth[oy1:oy2, ox1:ox2]))
-            # Reject background detections (curtain wrinkles, walls, floors)
             if patch_depth < 0.35:
                 continue
 
@@ -370,25 +329,6 @@ class PS13DEngine:
                         break
             if not overlap:
                 merged_boxes.append((bx, by, bw, bh))
-
-        # Full multi-character / multi-person support:
-        # Detect ALL valid people across the frame (up to 8 people); do NOT clamp to 1 or 2 dominant subjects.
-        # Filter out false-positive curtain/clothing folds when they lack eye confirmation or sufficient scale.
-        valid_merged = []
-        for bx, by, bw, bh in merged_boxes:
-            roi_h = int(round(bh * 0.65))
-            face_roi = det_gray_eq[by : by + roi_h, bx : bx + bw]
-            min_e = max(5, int(round(bw * 0.12)))
-            max_e = int(round(bw * 0.45))
-            eyes_chk = self.eye_cascade.detectMultiScale(face_roi, 1.06, 3, minSize=(min_e, min_e), maxSize=(max_e, max_e)) if not self.eye_cascade.empty() else ()
-            area = float(bw * bh)
-            if len(eyes_chk) > 0 or (area >= 0.18 * max_area):
-                valid_merged.append((bx, by, bw, bh))
-
-        if valid_merged:
-            merged_boxes = valid_merged[:8]
-        else:
-            merged_boxes = merged_boxes[:8]
 
         sx = ps1_w / float(det_w)
         sy = ps1_h / float(det_h)
@@ -460,62 +400,62 @@ class PS13DEngine:
             cu = center_u
             lu_in = 0.5 * (left_eye_u + cu) + 0.02
             ru_in = 0.5 * (right_eye_u + cu) - 0.02
-            lu_out = max(0.06, left_eye_u - 0.14)
-            ru_out = min(0.94, right_eye_u + 0.14)
+            lu_out = max(0.08, left_eye_u - 0.14)
+            ru_out = min(0.92, right_eye_u + 0.14)
 
-            # Natural anatomical head cage strictly within natural head curve (matching custom2.png):
-            # Forehead/hairline, supra-brow ridge, temples, infra-orbital cheekbones, nose, mouth, and tapered chin
             uv_cage = [
-                # Angular forehead & hairline (chunky 4-segment top matching custom2.png)
-                (0.16, 0.05),
-                (0.36, 0.02),
-                (cu, 0.01),
-                (0.64, 0.02),
-                (0.84, 0.05),
+                # Crown / Hairline arch
+                (0.18, -0.08), (0.36, -0.12), (cu, -0.14), (0.64, -0.12), (0.82, -0.08),
+                # Upper forehead
+                (0.12, 0.04), (0.32, 0.02), (cu, 0.02), (0.68, 0.02), (0.88, 0.04),
                 # Supra-brow ridge (top of orbital quads — sits ABOVE eyebrows)
-                (0.10, brow_top_v + 0.02),
+                (0.06, brow_top_v + 0.03),
                 (lu_out, brow_top_v),
+                (left_eye_u, brow_top_v - 0.01),
                 (lu_in, brow_top_v + 0.01),
-                (cu, brow_top_v + 0.01),
+                (cu, brow_top_v + 0.02),
                 (ru_in, brow_top_v + 0.01),
+                (right_eye_u, brow_top_v - 0.01),
                 (ru_out, brow_top_v),
-                (0.90, brow_top_v + 0.02),
+                (0.94, brow_top_v + 0.03),
                 # Mid-eye bridge & outer temples ONLY (nothing inside the iris/sclera!)
-                (0.08, eye_v),
+                (0.04, eye_v),
                 (lu_in + 0.01, eye_v),
                 (cu, eye_v),
                 (ru_in - 0.01, eye_v),
-                (0.92, eye_v),
+                (0.96, eye_v),
                 # Infra-orbital / cheekbone ridge (bottom of orbital quads — sits BELOW lower eyelids)
-                (0.10, eye_bot_v + 0.02),
+                (0.06, eye_bot_v + 0.02),
                 (lu_out, eye_bot_v),
+                (left_eye_u, eye_bot_v + 0.01),
                 (lu_in, eye_bot_v),
                 (cu, eye_bot_v + 0.01),
                 (ru_in, eye_bot_v),
+                (right_eye_u, eye_bot_v + 0.01),
                 (ru_out, eye_bot_v),
-                (0.90, eye_bot_v + 0.02),
-                # Nose tip, nostril wings & angular cheek planes
-                (0.12, nose_tip_v),
+                (0.94, eye_bot_v + 0.02),
+                # Nose tip, nostril wings & mid-cheek contours
+                (0.08, nose_tip_v),
                 (cu - 0.14, nose_tip_v + 0.01),
                 (cu, nose_tip_v),
                 (cu + 0.14, nose_tip_v + 0.01),
-                (0.88, nose_tip_v),
+                (0.92, nose_tip_v),
                 # Upper mouth box & outer jaw
-                (0.15, mouth_top_v + 0.02),
+                (0.11, mouth_top_v + 0.02),
                 (cu - 0.17, mouth_top_v),
                 (cu, mouth_top_v),
                 (cu + 0.17, mouth_top_v),
-                (0.85, mouth_top_v + 0.02),
-                # Lower mouth box & angular gonial jaw corners
-                (0.19, mouth_bot_v),
+                (0.89, mouth_top_v + 0.02),
+                # Lower mouth box & gonial jaw corners
+                (0.15, mouth_bot_v),
                 (cu - 0.16, mouth_bot_v),
                 (cu, mouth_bot_v + 0.01),
                 (cu + 0.16, mouth_bot_v),
-                (0.81, mouth_bot_v),
-                # Angular chin & neck base
-                (0.32, 0.96),
-                (cu, 0.99),
-                (0.68, 0.96),
+                (0.85, mouth_bot_v),
+                # Chin contour
+                (0.28, 0.99),
+                (cu, 1.03),
+                (0.72, 0.99),
             ]
 
             pts_native = []
@@ -524,16 +464,10 @@ class PS13DEngine:
                 py = float(np.clip(fy + v * fh, 1.0, ps1_h - 2.0))
                 pts_native.append([px, py])
 
-            hx1 = int(np.clip(np.floor(fx - 0.25 * fw), 0, ps1_w - 2))
-            hy1 = int(np.clip(np.floor(fy - 0.52 * fh), 0, ps1_h - 2))
-            hx2 = int(np.clip(np.ceil(fx + 1.25 * fw), hx1 + 2, ps1_w))
-            hy2 = int(np.clip(np.ceil(fy + 1.15 * fh), hy1 + 2, ps1_h))
-
-            # Estimate torso/body bounding box below the head for higher subject vertex density
-            bx1 = int(np.clip(np.floor(fx - 1.35 * fw), 0, ps1_w - 2))
-            by1 = int(np.clip(np.floor(fy + 0.85 * fh), 0, ps1_h - 2))
-            bx2 = int(np.clip(np.ceil(fx + 2.35 * fw), bx1 + 2, ps1_w))
-            by2 = int(np.clip(np.ceil(fy + 6.50 * fh), by1 + 2, ps1_h))
+            hx1 = int(np.clip(np.floor(fx - 0.18 * fw), 0, ps1_w - 2))
+            hy1 = int(np.clip(np.floor(fy - 0.28 * fh), 0, ps1_h - 2))
+            hx2 = int(np.clip(np.ceil(fx + 1.18 * fw), hx1 + 2, ps1_w))
+            hy2 = int(np.clip(np.ceil(fy + 1.12 * fh), hy1 + 2, ps1_h))
 
             prot_boxes = [
                 (
@@ -560,7 +494,6 @@ class PS13DEngine:
                 FaceRegion(
                     box=(int(round(fx)), int(round(fy)), int(round(fw)), int(round(fh))),
                     head_box=(hx1, hy1, hx2, hy2),
-                    body_box=(bx1, by1, bx2, by2),
                     landmarks=np.array(pts_native, dtype=np.float32),
                     eye_mouth_boxes=prot_boxes,
                 )
@@ -569,58 +502,44 @@ class PS13DEngine:
         return faces
 
     @staticmethod
-    def build_detail_and_head_weight_map(
-        native_rgb: np.ndarray,
+    def build_head_weight_map(
+        ps1_h: int,
+        ps1_w: int,
         faces: List[FaceRegion],
+        poly_mask: Optional[np.ndarray],
         depth: np.ndarray,
-        cfg: PS1Config,
+        cfg: Optional[PS1Config] = None,
     ) -> np.ndarray:
         """
-        Builds a continuous [0, 1] texture-preservation weight map controlled by `cfg.face_preservation`:
-          - Strict depth-gated weight over detected faces so background sky/walls around the head never get haloed
-          - Leaves body, limbs, clothing, and terrain at low weight so they exhibit chunky PS1 low-poly facets
+        Returns a smooth [0, 1] weight mask over head/face regions so `render_ps1_hardware` prioritizes
+        crisp CLUT texture clarity & gentle 3D shading on faces while keeping clothing/body chunky.
         """
-        ps1_h, ps1_w = depth.shape
-        head_weight = np.zeros((ps1_h, ps1_w), dtype=np.float32)
-
+        weight = np.zeros((ps1_h, ps1_w), dtype=np.float32)
         if faces:
             for face in faces:
                 fx, fy, fw, fh = face.box
                 cx = int(round(fx + fw * 0.5))
-                cy = int(round(fy + fh * 0.48))
-                rx = max(4, int(round(fw * 0.48)))
-                ry = max(4, int(round(fh * 0.54)))
-                face_ellipse = np.zeros((ps1_h, ps1_w), dtype=np.float32)
-                cv2.ellipse(face_ellipse, (cx, cy), (rx, ry), 0, 0, 360, 1.0, -1)
-                sigma = max(1.5, min(fw, fh) * 0.08)
-                face_ellipse = cv2.GaussianBlur(face_ellipse, (0, 0), sigmaX=sigma)
+                cy = int(round(fy + fh * 0.46))
+                rx = int(round(fw * 0.62))
+                ry = int(round(fh * 0.68))
+                cv2.ellipse(weight, (cx, cy), (max(4, rx), max(4, ry)), 0, 0, 360, 1.0, -1)
+        elif poly_mask is not None and np.any(poly_mask > 0):
+            ys, xs = np.where(poly_mask > 0)
+            y_min, y_max = int(ys.min()), int(ys.max())
+            span_h = y_max - y_min
+            if span_h > ps1_h * 0.35:
+                head_y2 = y_min + int(span_h * 0.48)
+                sub = poly_mask[y_min:head_y2, :] > 0
+                if np.any(sub):
+                    weight[y_min:head_y2, :][sub] = 0.85
 
-                # Strict foreground depth mask so `head_weight` NEVER spills onto walls/sky
-                bx1 = int(np.clip(round(fx + 0.2 * fw), 0, ps1_w - 1))
-                by1 = int(np.clip(round(fy + 0.2 * fh), 0, ps1_h - 1))
-                bx2 = int(np.clip(round(fx + 0.8 * fw), bx1 + 1, ps1_w))
-                by2 = int(np.clip(round(fy + 0.8 * fh), by1 + 1, ps1_h))
-                face_med_d = float(np.median(depth[by1:by2, bx1:bx2]))
-                depth_gate = (depth >= max(0.24, face_med_d - 0.28)).astype(np.float32) * np.clip((depth - (face_med_d - 0.20)) / 0.10, 0.0, 1.0)
-                head_weight = np.maximum(head_weight, face_ellipse * depth_gate)
-
-            combined = head_weight * float(np.clip(cfg.face_preservation, 0.0, 1.0))
-        else:
-            # Fallback when no Haar face fires: protect upper foreground focal head region (strictly depth >= 0.35)
-            fg_zone = depth >= 0.48
-            if np.any(fg_zone):
-                ys, xs = np.where(fg_zone)
-                y_min, y_max = int(ys.min()), int(ys.max())
-                span_h = y_max - y_min
-                if span_h > ps1_h * 0.25:
-                    head_y2 = y_min + int(span_h * 0.32)
-                    sub = fg_zone[y_min:head_y2, :]
-                    head_weight[y_min:head_y2, :][sub] = 0.85
-            sigma = max(2.0, min(ps1_h, ps1_w) * 0.02)
-            head_weight = cv2.GaussianBlur(head_weight, (0, 0), sigmaX=sigma) * (depth >= 0.35).astype(np.float32)
-            combined = head_weight * float(np.clip(cfg.face_preservation, 0.0, 1.0))
-
-        return np.clip(combined, 0.0, 1.0).astype(np.float32)
+        if np.any(weight > 0):
+            sigma = max(2.5, min(ps1_h, ps1_w) * 0.03)
+            weight = cv2.GaussianBlur(weight, (0, 0), sigmaX=sigma)
+            weight = np.clip(weight * 1.15, 0.0, 1.0)
+        if cfg is not None:
+            weight *= float(np.clip(cfg.face_preservation, 0.0, 1.0))
+        return weight
 
     @staticmethod
     def _quantize_clut_kmeans(
@@ -629,7 +548,10 @@ class PS13DEngine:
         seed: int = 42,
         mask: Optional[np.ndarray] = None,
     ) -> np.ndarray:
-        """Simulates a dedicated PS1 VRAM 4-bit/5-bit CLUT color palette via k-means in RGB space."""
+        """
+        Simulates a dedicated PS1 VRAM 4-bit/5-bit CLUT color palette via k-means in RGB space.
+        When `mask` is provided, palette entries are learned strictly from masked pixels.
+        """
         h, w, _ = img_rgb.shape
         all_pixels = img_rgb.reshape(-1, 3).astype(np.float32)
         if mask is not None and np.any(mask > 0):
@@ -651,28 +573,28 @@ class PS13DEngine:
         self,
         orig_rgb: np.ndarray,
         native_rgb: np.ndarray,
-        depth: np.ndarray,
         cfg: PS1Config,
         faces: List[FaceRegion],
+        fg_mask: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Synthesizes authentic Dual-CLUT PS1 VRAM textures + smooth scalar depth fog (ZERO Telea inpainting!):
-          1. Foreground CLUT (`depth >= 0.35` or inside subject boxes) + Background/Sky CLUT (`depth < 0.35`)
-          2. Smooth atmospheric depth fog applied via continuous depth scalar (`depth < 0.35`)
-          3. Dedicated Head / Focal VRAM Texture Page (`cfg.head_tex_resolution`) cropped from full-res source
+        Synthesizes authentic PS1 VRAM textures for the 3D subject mesh:
+          1. Body / Subject VRAM Texture Page at `cfg.tex_resolution` with foreground CLUT palette
+          2. Dedicated Head / Face VRAM Texture Page (`cfg.head_tex_resolution` across the head box)
+             sampled from high-res source with its own dedicated Head CLUT (strictly masked to the subject!)
         """
         nh, nw = native_rgb.shape[:2]
         oh, ow = orig_rgb.shape[:2]
 
         work = cv2.cvtColor(native_rgb, cv2.COLOR_RGB2BGR)
         for _ in range(2):
-            work = cv2.bilateralFilter(work, d=5, sigmaColor=26, sigmaSpace=9)
+            work = cv2.bilateralFilter(work, d=5, sigmaColor=30, sigmaSpace=10)
         stylized_rgb = cv2.cvtColor(work, cv2.COLOR_BGR2RGB)
 
         gray = cv2.cvtColor(native_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
         blur_g = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(1.1, min(nh, nw) / 115.0))
-        detail = np.clip((gray - blur_g) / 255.0, -0.28, 0.22)
-        boosted_scene = np.clip(stylized_rgb.astype(np.float32) + detail[:, :, None] * 85.0, 0, 255).astype(np.uint8)
+        detail = np.clip((gray - blur_g) / 255.0, -0.30, 0.22)
+        boosted_body = np.clip(stylized_rgb.astype(np.float32) + detail[:, :, None] * 95.0, 0, 255).astype(np.uint8)
 
         if nw <= nh:
             tex_w = max(32, cfg.tex_resolution)
@@ -681,43 +603,68 @@ class PS13DEngine:
             tex_h = max(32, cfg.tex_resolution)
             tex_w = max(32, int(round(tex_h * (nw / float(nh)))))
 
-        tiny_scene = cv2.resize(boosted_scene, (tex_w, tex_h), interpolation=cv2.INTER_AREA)
-        tiny_depth = cv2.resize(depth, (tex_w, tex_h), interpolation=cv2.INTER_AREA)
+        tiny_body = cv2.resize(boosted_body, (tex_w, tex_h), interpolation=cv2.INTER_AREA)
+        tiny_fg_mask = (
+            cv2.resize(fg_mask, (tex_w, tex_h), interpolation=cv2.INTER_NEAREST)
+            if fg_mask is not None
+            else None
+        )
+        body_clut = self._quantize_clut_kmeans(tiny_body, cfg.clut_colors, seed=cfg.seed, mask=tiny_fg_mask)
+        ps1_tex_rgb = cv2.resize(body_clut, (nw, nh), interpolation=cv2.INTER_NEAREST)
 
-        # Build continuous depth-based foreground vs. background domain masks (no rectangular box seams!)
-        fg_domain = tiny_depth >= 0.35
+        for f_idx, face in enumerate(faces):
+            hx1, hy1, hx2, hy2 = face.head_box
+            hw_n, hh_n = hx2 - hx1, hy2 - hy1
+            if hw_n < 12 or hh_n < 12:
+                continue
 
-        if 0.05 < float(np.mean(fg_domain)) < 0.92:
-            fg_clut = self._quantize_clut_kmeans(
-                tiny_scene, cfg.clut_colors, seed=cfg.seed, mask=fg_domain.astype(np.uint8)
-            )
-            bg_clut = self._quantize_clut_kmeans(
-                tiny_scene, cfg.bg_clut_colors, seed=cfg.seed + 11, mask=(~fg_domain).astype(np.uint8)
-            )
-            tiny_combined = np.where(fg_domain[:, :, None], fg_clut, bg_clut)
-        else:
-            tiny_combined = self._quantize_clut_kmeans(tiny_scene, cfg.clut_colors, seed=cfg.seed)
+            ox1 = int(np.clip(round(hx1 * (ow / float(nw))), 0, ow - 2))
+            oy1 = int(np.clip(round(hy1 * (oh / float(nh))), 0, oh - 2))
+            ox2 = int(np.clip(round(hx2 * (ow / float(nw))), ox1 + 2, ow))
+            oy2 = int(np.clip(round(hy2 * (oh / float(nh))), oy1 + 2, oh))
+            head_orig = orig_rgb[oy1:oy2, ox1:ox2]
 
-        ps1_tex_rgb = cv2.resize(tiny_combined, (nw, nh), interpolation=cv2.INTER_NEAREST)
-
-        # Apply smooth scalar PS1 distance fog on distant background (`depth < 0.35`) without rectangular box cutouts!
-        if cfg.fog_strength > 0.01:
-            bg_region = depth < 0.35
-            if np.any(bg_region):
-                fog_color = np.median(ps1_tex_rgb[bg_region], axis=0).astype(np.float32) * 0.85 + np.array(
-                    [22.0, 26.0, 32.0], dtype=np.float32
-                )
+            h_aspect = hw_n / float(hh_n)
+            head_short = max(28, min(cfg.head_tex_resolution, min(hw_n, hh_n)))
+            if h_aspect <= 1.0:
+                ht_w = head_short
+                ht_h = max(28, int(round(head_short / h_aspect)))
             else:
-                fog_color = np.array([150.0, 160.0, 175.0], dtype=np.float32)
+                ht_h = head_short
+                ht_w = max(28, int(round(head_short * h_aspect)))
 
-            fog_scalar = np.clip((0.35 - depth) / 0.35, 0.0, 1.0) ** 1.35
-            fog_alpha = (fog_scalar * cfg.fog_strength)[:, :, None]
-            ps1_tex_rgb = np.clip(
-                ps1_tex_rgb.astype(np.float32) * (1.0 - fog_alpha) + fog_color[None, None, :] * fog_alpha, 0, 255
-            ).astype(np.uint8)
-            stylized_rgb = np.clip(
-                stylized_rgb.astype(np.float32) * (1.0 - fog_alpha) + fog_color[None, None, :] * fog_alpha, 0, 255
-            ).astype(np.uint8)
+            head_small = cv2.resize(head_orig, (ht_w, ht_h), interpolation=cv2.INTER_AREA)
+            head_clean = cv2.cvtColor(
+                cv2.bilateralFilter(cv2.cvtColor(head_small, cv2.COLOR_RGB2BGR), d=5, sigmaColor=20, sigmaSpace=8),
+                cv2.COLOR_BGR2RGB,
+            )
+
+            hg = cv2.cvtColor(head_small, cv2.COLOR_RGB2GRAY).astype(np.float32)
+            hg_blur = cv2.GaussianBlur(hg, (0, 0), sigmaX=1.0)
+            h_detail = np.clip((hg - hg_blur) / 255.0, -0.35, 0.26)
+            head_painted = np.clip(head_clean.astype(np.float32) + h_detail[:, :, None] * 115.0, 0, 255).astype(np.uint8)
+
+            head_mask_tiny = None
+            if fg_mask is not None:
+                hm_crop = fg_mask[hy1:hy2, hx1:hx2]
+                head_mask_tiny = cv2.resize(hm_crop, (ht_w, ht_h), interpolation=cv2.INTER_NEAREST)
+
+            head_clut = self._quantize_clut_kmeans(
+                head_painted, cfg.head_clut_colors, seed=cfg.seed + 31 + f_idx, mask=head_mask_tiny
+            )
+            head_upscaled = cv2.resize(head_clut, (hw_n, hh_n), interpolation=cv2.INTER_NEAREST)
+
+            blend = np.ones((hh_n, hw_n), dtype=np.float32)
+            pad_x = max(2, int(round(hw_n * 0.10)))
+            pad_y = max(2, int(round(hh_n * 0.10)))
+            blend[:pad_y, :] *= np.linspace(0.0, 1.0, pad_y, dtype=np.float32)[:, None]
+            blend[-pad_y:, :] *= np.linspace(1.0, 0.0, pad_y, dtype=np.float32)[:, None]
+            blend[:, :pad_x] *= np.linspace(0.0, 1.0, pad_x, dtype=np.float32)[None, :]
+            blend[:, -pad_x:] *= np.linspace(1.0, 0.0, pad_x, dtype=np.float32)[None, :]
+
+            cur_patch = ps1_tex_rgb[hy1:hy2, hx1:hx2].astype(np.float32)
+            merged = cur_patch * (1.0 - blend[:, :, None]) + head_upscaled.astype(np.float32) * blend[:, :, None]
+            ps1_tex_rgb[hy1:hy2, hx1:hx2] = np.clip(np.round(merged), 0, 255).astype(np.uint8)
 
         return stylized_rgb, ps1_tex_rgb
 
@@ -729,12 +676,12 @@ class PS13DEngine:
         cfg: PS1Config,
     ) -> Tuple[Optional[np.ndarray], Optional[list]]:
         """
-        Optional foreground segmentation used ONLY when `cfg.scene_mode == "isolated_subject"`.
-        In `full_scene` mode (default), returns `(None, None)` so the entire scene is meshed continuously.
+        Extracts the foreground character/subject as a straight-edged PS1 polygonal silhouette (`poly_mask`, `poly_list`)
+        so that:
+          - All 3D low-poly facets, normal lighting, and creases are confined strictly to the subject
+          - The background wall, ceiling light, or sky remains a flat, clean 2D PS1 backdrop plate
+          - Detected faces/heads are locked as foreground so GrabCut never chops off heads on outdoor scenes
         """
-        if cfg.scene_mode != "isolated_subject":
-            return None, None
-
         h, w = depth.shape
         d_u8 = (depth * 255.0).astype(np.uint8)
         otsu_thresh, _ = cv2.threshold(d_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -742,11 +689,11 @@ class PS13DEngine:
 
         fg_init = depth >= thresh_val
         fg_ratio = float(np.mean(fg_init))
-        if fg_ratio < 0.08 or fg_ratio > 0.90:
+        if fg_ratio < 0.08 or fg_ratio > 0.92:
             return None, None
         fg_mean = float(depth[fg_init].mean())
         bg_mean = float(depth[~fg_init].mean())
-        if (fg_mean - bg_mean) < 0.22:
+        if (fg_mean - bg_mean) < 0.20:
             return None, None
 
         gc_mask = np.full((h, w), cv2.GC_PR_BGD, dtype=np.uint8)
@@ -754,16 +701,15 @@ class PS13DEngine:
         gc_mask[depth >= thresh_val] = cv2.GC_PR_FGD
         gc_mask[depth >= min(0.92, thresh_val + 0.16)] = cv2.GC_FGD
 
+        # Seed strict inner core of detected faces (nose/eyes/mouth) as definite foreground so GrabCut
+        # never notches cheeks, while letting outer jaw/ear edges snap tightly to true silhouette boundaries!
         for face in faces:
             fx, fy, fw, fh = face.box
             cx = int(round(fx + fw * 0.5))
-            cy = int(round(fy + fh * 0.46))
-            cv2.ellipse(
-                gc_mask,
-                (cx, cy),
-                (max(3, int(round(fw * 0.36))), max(3, int(round(fh * 0.44)))),
-                0, 0, 360, int(cv2.GC_FGD), -1,
-            )
+            cy = int(round(fy + fh * 0.48))
+            rx_inner = max(3, int(round(fw * 0.32)))
+            ry_inner = max(3, int(round(fh * 0.40)))
+            cv2.ellipse(gc_mask, (cx, cy), (rx_inner, ry_inner), 0, 0, 360, int(cv2.GC_FGD), -1)
 
         bgd_model = np.zeros((1, 65), np.float64)
         fgd_model = np.zeros((1, 65), np.float64)
@@ -774,7 +720,7 @@ class PS13DEngine:
         except cv2.error:
             refined = (fg_init.astype(np.uint8)) * 255
 
-        k_size = max(3, int(round(min(h, w) * 0.015)) | 1)
+        k_size = max(3, int(round(min(h, w) * 0.02)) | 1)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
         refined = cv2.morphologyEx(refined, cv2.MORPH_CLOSE, kernel)
         refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
@@ -790,15 +736,21 @@ class PS13DEngine:
 
         poly_mask = np.zeros((h, w), dtype=np.uint8)
         poly_list = []
-        body_eps = float(np.clip(min(h, w) * cfg.silhouette_simplify * 2.0, 1.8, 3.8))
         for cnt in valid_contours:
-            approx = cv2.approxPolyDP(cnt, body_eps, True)
+            peri = cv2.arcLength(cnt, True)
+            eps = cfg.silhouette_simplify * peri
+            approx = cv2.approxPolyDP(cnt, eps, True)
             if len(approx) >= 4:
                 cv2.fillPoly(poly_mask, [approx], 255)
                 poly_list.append(approx.reshape(-1, 2))
 
         if not poly_list:
             return None, None
+
+        final_ratio = float(np.mean(poly_mask > 0))
+        if final_ratio < 0.06 or final_ratio > 0.94:
+            return None, None
+
         return poly_mask, poly_list
 
     @staticmethod
@@ -826,21 +778,20 @@ class PS13DEngine:
         cfg: PS1Config,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Builds a continuous full-scene (or isolated-subject) low-poly 3D mesh:
-          - Pins the 4 outer frame borders in `full_scene` mode
-          - Places dense anatomical & protective hair/ear silhouette vertices on faces
-          - Concentrates vertices along high-contrast structural edges (character silhouette, horizon, ridges)
-            and keeps flat open sky regions sparse and chunky
-          - Flips quad diagonals to snap triangle edges along silhouettes so sky facets never cut into heads!
+        Builds an anatomical + feature-aligned low-poly 3D mesh strictly confined to the foreground subject:
+          - Locks clean symmetrical PS1 head cage landmarks (orbital quads, nose bridge, cheek planes, mouth box)
+          - Suppresses random clutter vertices inside smooth facial planes & eye sockets
+          - Places vertices along silhouette & strong clothing/accessory contours
+          - Carves out all background regions so walls/ceilings/sky NEVER receive 3D triangular facets!
         """
         rng = np.random.default_rng(cfg.seed)
         depth = np.asarray(depth, dtype=np.float32)
         h, w = depth.shape
-        target_verts = max(65, int(round(cfg.poly_count * 0.54)))
+        target_verts = max(55, int(round(cfg.poly_count * 0.54)))
 
         active_area = float(np.sum(poly_mask > 0)) if poly_mask is not None else float(h * w)
         avg_tri_spacing = np.sqrt(active_area / float(max(30, target_verts)))
-        min_dist = max(3.5, avg_tri_spacing * 0.52)
+        min_dist = max(4.0, avg_tri_spacing * 0.55)
 
         chosen_pts: List[List[float]] = []
 
@@ -857,18 +808,18 @@ class PS13DEngine:
                 return True
             return False
 
-        # 1. Seed outer frame borders (in full_scene mode) or polygonal silhouette (in isolated_subject mode)
+        # 1. Seed outer polygonal silhouette (or frame border if no foreground cutout exists)
         if poly_mask is not None and poly_contours is not None:
-            max_sil_seg = max(6.5, avg_tri_spacing * 0.85)
+            max_sil_seg = max(8.0, avg_tri_spacing * 0.95)
             for cnt in poly_contours:
                 for pt in cnt:
-                    _try_add_point(pt[0], pt[1], min_dist * 0.38)
+                    _try_add_point(pt[0], pt[1], min_dist * 0.45)
                 sub_pts = self._subdivide_polygon_contour(cnt, max_sil_seg)
                 for pt in sub_pts:
-                    _try_add_point(pt[0], pt[1], min_dist * 0.55)
+                    _try_add_point(pt[0], pt[1], min_dist * 0.65)
         else:
-            border_steps_x = max(10, int(round(w / (avg_tri_spacing * 1.05))))
-            border_steps_y = max(10, int(round(h / (avg_tri_spacing * 1.05))))
+            border_steps_x = max(8, int(round(w / (avg_tri_spacing * 1.1))))
+            border_steps_y = max(8, int(round(h / (avg_tri_spacing * 1.1))))
             for x in np.linspace(0, w - 1, border_steps_x):
                 _try_add_point(x, 0, 2.0)
                 _try_add_point(x, h - 1, 2.0)
@@ -876,40 +827,24 @@ class PS13DEngine:
                 _try_add_point(0, y, 2.0)
                 _try_add_point(w - 1, y, 2.0)
 
-        # 2. Seed structured anatomical PS1 head cage landmarks & trace exact hair/head silhouette edges
+        # 2. Seed structured anatomical PS1 head cage landmarks & build smooth-face exclusion mask
         face_smooth_exclusion = np.zeros((h, w), dtype=np.uint8)
         orbital_mouth_exclusion = np.zeros((h, w), dtype=np.uint8)
-        head_roi_mask = np.zeros((h, w), dtype=np.uint8)
-        body_roi_mask = np.zeros((h, w), dtype=np.uint8)
 
         for face in faces:
             fx, fy, fw, fh = face.box
-            hx1, hy1, hx2, hy2 = face.head_box
-            bx1, by1, bx2, by2 = face.body_box
-            head_roi_mask[hy1:hy2, hx1:hx2] = 255
-            body_roi_mask[by1:by2, bx1:bx2] = 255
-
-            icx1 = int(np.clip(round(fx + 0.2 * fw), 0, w - 1))
-            icy1 = int(np.clip(round(fy + 0.2 * fh), 0, h - 1))
-            icx2 = int(np.clip(round(fx + 0.8 * fw), icx1 + 1, w))
-            icy2 = int(np.clip(round(fy + 0.8 * fh), icy1 + 1, h))
-            face_med_d = float(np.median(depth[icy1:icy2, icx1:icx2]))
-
-            face_min_d = max(1.8, min(fw, fh) * 0.08)
+            face_min_d = max(2.8, min(fw, fh) * 0.085)
             for lm in face.landmarks:
-                ix_l = int(np.clip(round(lm[0]), 0, w - 1))
-                iy_l = int(np.clip(round(lm[1]), 0, h - 1))
-                # Only seed landmark if it lies on the foreground head (never on background sky/wall!)
-                if depth[iy_l, ix_l] >= (face_med_d - 0.14):
-                    if poly_mask is None or poly_mask[iy_l, ix_l] > 0:
-                        _try_add_point(lm[0], lm[1], face_min_d)
+                ix_l, iy_l = int(round(lm[0])), int(round(lm[1]))
+                if poly_mask is None or poly_mask[iy_l, ix_l] > 0:
+                    _try_add_point(lm[0], lm[1], face_min_d)
 
             cx = int(round(fx + fw * 0.5))
             cy = int(round(fy + fh * 0.48))
             cv2.ellipse(
                 face_smooth_exclusion,
                 (cx, cy),
-                (max(4, int(round(fw * 0.42))), max(4, int(round(fh * 0.48)))),
+                (max(4, int(round(fw * 0.46))), max(4, int(round(fh * 0.54)))),
                 0, 0, 360, 255, -1,
             )
             for x1, y1, x2, y2 in face.eye_mouth_boxes:
@@ -921,61 +856,33 @@ class PS13DEngine:
                     -1,
                 )
 
-        # 3. Seed high-contrast structural edges:
-        #    Trace true hairline/ear/head silhouette contours inside `head_roi_mask`
+        # 3. Seed strong structural Canny contours inside the subject
         clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
         eq_l = clahe.apply(cv2.cvtColor(stylized_rgb, cv2.COLOR_RGB2GRAY))
-        edges_fine = cv2.Canny(eq_l, 45, 115)
-        edges_Fine_head = cv2.bitwise_and(edges_fine, head_roi_mask)
-        edges_Fine_head[orbital_mouth_exclusion > 0] = 0
-
-        head_contours, _ = cv2.findContours(edges_Fine_head, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        head_contours = sorted(head_contours, key=lambda c: cv2.arcLength(c, False), reverse=True)
-        for hc in head_contours:
-            if cv2.arcLength(hc, False) < 5.0:
-                continue
-            approx_hc = cv2.approxPolyDP(hc, 1.8, False).reshape(-1, 2)
-            for pt in approx_hc:
-                px_i, py_i = int(round(pt[0])), int(round(pt[1]))
-                if face_smooth_exclusion[py_i, px_i] == 0:
-                    _try_add_point(pt[0], pt[1], max(2.4, min_dist * 0.48))
-
-        # Next seed general scene & character silhouette contours with coarse, blocky PS1 polygonal segments
-        edges_scene = cv2.Canny(eq_l, 75, 160)
-        d_u8 = (depth * 255.0).astype(np.uint8)
-        depth_edges = cv2.Canny(d_u8, 30, 80)
-        combined_edges = cv2.bitwise_or(edges_scene, depth_edges)
+        edges = cv2.Canny(eq_l, 55, 135)
         if poly_mask is not None:
             erode_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            combined_edges = cv2.bitwise_and(combined_edges, cv2.erode(poly_mask, erode_k))
-        combined_edges[orbital_mouth_exclusion > 0] = 0
+            edges = cv2.bitwise_and(edges, cv2.erode(poly_mask, erode_k))
+        edges[orbital_mouth_exclusion > 0] = 0
 
-        edge_contours, _ = cv2.findContours(combined_edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        edge_contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         edge_contours = sorted(edge_contours, key=lambda c: cv2.arcLength(c, False), reverse=True)
-        edge_budget = int(target_verts * 0.65)
+        edge_budget = int(target_verts * 0.72)
         for ec in edge_contours:
             if len(chosen_pts) >= edge_budget:
                 break
-            if cv2.arcLength(ec, False) < min_dist * 1.8:
+            arc_len = cv2.arcLength(ec, False)
+            if arc_len < min_dist * 1.6:
                 continue
-            # Higher epsilon on approxPolyDP breaks body/torso contours into chunky, straight-edge polygonal segments
-            approx_ec = cv2.approxPolyDP(ec, max(3.6, min_dist * 1.05), False).reshape(-1, 2)
+            approx_ec = cv2.approxPolyDP(ec, max(2.0, min_dist * 0.45), False).reshape(-1, 2)
             for pt in approx_ec:
                 if len(chosen_pts) >= edge_budget:
                     break
                 px_i, py_i = int(round(pt[0])), int(round(pt[1]))
-                if face_smooth_exclusion[py_i, px_i] > 0:
-                    local_d = min_dist * 1.30
-                elif head_roi_mask[py_i, px_i] > 0:
-                    local_d = min_dist * 0.62
-                elif body_roi_mask[py_i, px_i] > 0:
-                    # Larger minimum distance on torso/clothing so the mesh forms broad, blocky geometric quads/prisms
-                    local_d = min_dist * 1.32
-                else:
-                    local_d = min_dist * 1.12
+                local_d = min_dist * 1.15 if face_smooth_exclusion[py_i, px_i] > 0 else min_dist * 0.85
                 _try_add_point(pt[0], pt[1], local_d)
 
-        # 4. Adaptive Importance Sampling for remaining vertices:
+        # 4. Fill remaining body/subject vertex budget outside the protected face oval
         lab = cv2.cvtColor(stylized_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
         gx = cv2.Scharr(eq_l.astype(np.float32), cv2.CV_32F, 1, 0)
         gy = cv2.Scharr(eq_l.astype(np.float32), cv2.CV_32F, 0, 1)
@@ -987,10 +894,7 @@ class PS13DEngine:
         depth_grad = np.hypot(dgx, dgy)
         depth_grad /= (np.percentile(depth_grad, 99.0) + 1e-6)
 
-        importance = (0.04 + 0.45 * color_grad + 0.51 * depth_grad) * (0.25 + 0.95 * (depth ** 1.1))
-        if np.any(body_roi_mask > 0):
-            # Reduce random interior point density on clothing/torso so body facets stay broad and blocky
-            importance[body_roi_mask > 0] *= 0.65
+        importance = (0.18 + 0.55 * color_grad + 0.27 * depth_grad) * (0.40 + 0.80 * depth)
         if poly_mask is not None:
             importance[poly_mask == 0] = 0.0
         importance[face_smooth_exclusion > 0] = 0.0
@@ -999,10 +903,10 @@ class PS13DEngine:
         prob_sum = prob.sum()
         if prob_sum > 1e-8 and len(chosen_pts) < target_verts:
             prob /= prob_sum
-            n_candidates = min(len(prob), max(2800, target_verts * 15))
+            n_candidates = min(len(prob), max(2500, target_verts * 14))
             flat_indices = rng.choice(len(prob), size=n_candidates, replace=True, p=prob)
             cy_cand, cx_cand = np.divmod(flat_indices, w)
-            for cur_scale in (1.15, 0.90, 0.72):
+            for cur_scale in (1.0, 0.72, 0.50):
                 if len(chosen_pts) >= target_verts:
                     break
                 for cx_i, cy_i in zip(cx_cand, cy_cand):
@@ -1010,90 +914,58 @@ class PS13DEngine:
                         break
                     jx = cx_i + rng.uniform(-0.35, 0.35)
                     jy = cy_i + rng.uniform(-0.35, 0.35)
-                    body_mult = 1.25 if body_roi_mask[int(cy_i), int(cx_i)] > 0 else 1.0
-                    _try_add_point(jx, jy, min_dist * cur_scale * body_mult)
+                    _try_add_point(jx, jy, min_dist * cur_scale)
 
         points = np.array(chosen_pts, dtype=np.float32)
         tri_delaunay = Delaunay(points)
         triangles = tri_delaunay.simplices.astype(np.int32)
 
-        # Subdivide bridging edges across negative space valleys (e.g. between arm and torso or between subjects)
-        p_depths = depth[
-            np.clip(np.round(points[:, 1]).astype(int), 0, h - 1),
-            np.clip(np.round(points[:, 0]).astype(int), 0, w - 1),
-        ]
-        valley_pts = []
-        for tri in triangles:
-            for i_a, i_b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
-                za, zb = float(p_depths[i_a]), float(p_depths[i_b])
-                if min(za, zb) >= 0.42:
-                    mid_x = 0.5 * (points[i_a, 0] + points[i_b, 0])
-                    mid_y = 0.5 * (points[i_a, 1] + points[i_b, 1])
-                    mid_z = float(
-                        depth[int(np.clip(round(mid_y), 0, h - 1)), int(np.clip(round(mid_x), 0, w - 1))]
-                    )
-                    if (min(za, zb) - mid_z) > 0.20 and mid_z < 0.35:
-                        valley_pts.append([mid_x, mid_y])
-        if valley_pts:
-            for vp in valley_pts:
-                _try_add_point(vp[0], vp[1], min_dist * 0.45)
-            points = np.array(chosen_pts, dtype=np.float32)
-            tri_delaunay = Delaunay(points)
-            triangles = tri_delaunay.simplices.astype(np.int32)
-
-        # 5. If in isolated_subject mode, carve concave silhouette regions
+        # 5. Strictly carve out all triangles outside the foreground subject (`poly_mask`)
         if poly_mask is not None:
-            dil_3 = cv2.dilate(poly_mask, np.ones((3, 3), dtype=np.uint8))
+            centroids = np.mean(points[triangles], axis=1)
+            mid01 = 0.5 * (points[triangles[:, 0]] + points[triangles[:, 1]])
+            mid12 = 0.5 * (points[triangles[:, 1]] + points[triangles[:, 2]])
+            mid20 = 0.5 * (points[triangles[:, 2]] + points[triangles[:, 0]])
 
-            def _in_mask(pts_2d: np.ndarray, m: np.ndarray) -> np.ndarray:
+            def _inside(pts_2d: np.ndarray) -> np.ndarray:
                 ix = np.clip(np.round(pts_2d[:, 0]).astype(int), 0, w - 1)
                 iy = np.clip(np.round(pts_2d[:, 1]).astype(int), 0, h - 1)
-                return m[iy, ix] > 0
+                return poly_mask[iy, ix] > 0
 
-            p0 = points[triangles[:, 0]]
-            p1 = points[triangles[:, 1]]
-            p2 = points[triangles[:, 2]]
-            centroids = (p0 + p1 + p2) / 3.0
+            inside_votes = (
+                _inside(centroids).astype(int) * 2
+                + _inside(mid01).astype(int)
+                + _inside(mid12).astype(int)
+                + _inside(mid20).astype(int)
+            )
+            triangles = triangles[inside_votes >= 3]
 
-            keep = _in_mask(centroids, poly_mask)
-            for t_val in (0.25, 0.50, 0.75):
-                keep &= _in_mask(p0 * (1.0 - t_val) + p1 * t_val, dil_3)
-                keep &= _in_mask(p1 * (1.0 - t_val) + p2 * t_val, dil_3)
-                keep &= _in_mask(p2 * (1.0 - t_val) + p0 * t_val, dil_3)
-
-            triangles = triangles[keep]
-
-        # 6. Optimize interior quad diagonals to snap triangle edges along hair/head/horizon silhouettes
+        # 6. Optimize interior quad diagonals ONLY outside protected eye/mouth quads
         triangles = self._optimize_triangulation_edges(points, triangles, lab, depth, orbital_mouth_exclusion)
 
-        # 7. Edge-preserving 3D Z field with natural facial relief (nose bridge, brow ridge, cheek planes)
-        depth_smooth = cv2.bilateralFilter(depth, d=5, sigmaColor=0.10, sigmaSpace=4.0)
+        # 7. Smooth, tear-free 3D Z surface across the foreground subject
+        clean_depth = depth.copy()
+        if poly_mask is not None and np.any(poly_mask == 0):
+            bg_u8 = (poly_mask == 0).astype(np.uint8) * 255
+            d_u8 = np.clip(np.round(clean_depth * 255.0), 0, 255).astype(np.uint8)
+            clean_depth = cv2.inpaint(d_u8, bg_u8, inpaintRadius=5, flags=cv2.INPAINT_TELEA).astype(np.float32) / 255.0
 
-        # Allow natural 3D depth extrusion for the nose bridge, brow ridge, and cheekbones relative to temples and ears
-        depth_relief = depth_smooth.copy()
+        sigma_d = max(2.5, min(h, w) * 0.025)
+        depth_smooth = cv2.GaussianBlur(clean_depth, (0, 0), sigmaX=sigma_d)
+
         for face in faces:
             fx, fy, fw, fh = face.box
-            cx, cy = int(fx + 0.50 * fw), int(fy + 0.48 * fh)
-            # Nose bridge subtle forward extrusion (+0.038)
-            nose_y1, nose_y2 = int(fy + 0.36 * fh), int(fy + 0.68 * fh)
-            nose_x1, nose_x2 = int(fx + 0.44 * fw), int(fx + 0.56 * fw)
-            if nose_y2 > nose_y1 and nose_x2 > nose_x1:
-                depth_relief[nose_y1:nose_y2, nose_x1:nose_x2] = np.maximum(
-                    depth_relief[nose_y1:nose_y2, nose_x1:nose_x2],
-                    depth_smooth[nose_y1:nose_y2, nose_x1:nose_x2] + 0.032,
-                )
-            # Supra-brow ridge forward extrusion (+0.024)
-            brow_y1, brow_y2 = int(fy + 0.16 * fh), int(fy + 0.28 * fh)
-            brow_x1, brow_x2 = int(fx + 0.22 * fw), int(fx + 0.78 * fw)
-            if brow_y2 > brow_y1 and brow_x2 > brow_x1:
-                depth_relief[brow_y1:brow_y2, brow_x1:brow_x2] = np.maximum(
-                    depth_relief[brow_y1:brow_y2, brow_x1:brow_x2],
-                    depth_smooth[brow_y1:brow_y2, brow_x1:brow_x2] + 0.022,
-                )
+            yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+            nx = (xx - (fx + fw * 0.5)) / (max(1.0, fw) * 0.55)
+            ny = (yy - (fy + fh * 0.48)) / (max(1.0, fh) * 0.60)
+            r2 = nx * nx + ny * ny
+            cranial_dome = np.clip(1.0 - r2, 0.0, 1.0) ** 1.2
+            nose_ridge = np.exp(-((nx / 0.22) ** 2)) * np.exp(-(((ny - 0.05) / 0.32) ** 2))
+            depth_smooth += 0.08 * cranial_dome + 0.05 * nose_ridge
 
         ix = np.clip(np.round(points[:, 0]).astype(int), 0, w - 1)
         iy = np.clip(np.round(points[:, 1]).astype(int), 0, h - 1)
-        z_raw = np.clip(depth_relief[iy, ix], 0.0, 1.0)
+        z_raw = np.clip(depth_smooth[iy, ix], 0.0, 1.25)
         z_quant = np.round(z_raw * 64.0) / 64.0
         z_coords = z_quant * cfg.depth_scale
 
@@ -1115,26 +987,20 @@ class PS13DEngine:
         lab_img: np.ndarray,
         depth: np.ndarray,
         protected_mask: Optional[np.ndarray] = None,
-        passes: int = 3,
+        passes: int = 2,
     ) -> np.ndarray:
-        """
-        Flips interior quad diagonals when doing so reduces within-triangle color & depth variance,
-        forcing triangle edges to align with hairlines, ears, shoulders, and horizon boundaries.
-        """
+        """Flips interior quad diagonals when doing so reduces color/depth variance without disturbing eye/mouth quads."""
         h, w = depth.shape
         tris = triangles.copy()
-        feature_field = np.dstack([lab_img * 0.65, depth[:, :, None] * 75.0]).astype(np.float32)
+        feature_field = np.dstack([lab_img * 0.6, depth[:, :, None] * 60.0]).astype(np.float32)
 
         def _tri_variance_cost(i0: int, i1: int, i2: int) -> float:
             p0, p1, p2 = points[i0], points[i1], points[i2]
             samples = np.array(
                 [
-                    0.65 * p0 + 0.175 * p1 + 0.175 * p2,
-                    0.175 * p0 + 0.65 * p1 + 0.175 * p2,
-                    0.175 * p0 + 0.175 * p1 + 0.65 * p2,
-                    0.50 * (p0 + p1),
-                    0.50 * (p1 + p2),
-                    0.50 * (p2 + p0),
+                    0.60 * p0 + 0.20 * p1 + 0.20 * p2,
+                    0.20 * p0 + 0.60 * p1 + 0.20 * p2,
+                    0.20 * p0 + 0.20 * p1 + 0.60 * p2,
                     (p0 + p1 + p2) / 3.0,
                 ],
                 dtype=np.float32,
@@ -1155,7 +1021,7 @@ class PS13DEngine:
             c0 = abs(float(np.dot(v0, -v2)) / (l0 * l2))
             c1 = abs(float(np.dot(v1, -v0)) / (l1 * l0))
             c2 = abs(float(np.dot(v2, -v1)) / (l2 * l1))
-            return max(c0, c1, c2) < 0.96
+            return max(c0, c1, c2) < 0.955
 
         for _ in range(passes):
             edge_map = {}
@@ -1187,14 +1053,14 @@ class PS13DEngine:
                 if _signed_area2(points[u], points[v], points[a]) < 0:
                     u, v = v, u
                 pa, pb, pu, pv = points[a], points[b], points[u], points[v]
-                if _signed_area2(pu, pb, pa) <= 2.0 or _signed_area2(pb, pv, pa) <= 2.0:
+                if _signed_area2(pu, pb, pa) <= 2.5 or _signed_area2(pb, pv, pa) <= 2.5:
                     continue
                 if not (_min_cos_ok(pu, pb, pa) and _min_cos_ok(pb, pv, pa)):
                     continue
 
                 old_cost = _tri_variance_cost(u, v, a) + _tri_variance_cost(v, u, b)
                 new_cost = _tri_variance_cost(u, b, a) + _tri_variance_cost(b, v, a)
-                if new_cost < old_cost * 0.92:
+                if new_cost < old_cost * 0.90:
                     tris[t1] = [u, b, a]
                     tris[t2] = [b, v, a]
                     locked_tris.add(t1)
@@ -1205,62 +1071,71 @@ class PS13DEngine:
 
     def render_backdrop(
         self,
-        ps1_tex_rgb: np.ndarray,
+        img_rgb: np.ndarray,
         depth: np.ndarray,
         poly_mask: Optional[np.ndarray],
         cfg: PS1Config,
     ) -> np.ndarray:
         """
-        Initializes the native 240p framebuffer prior to polygon rasterization.
-        In `full_scene` mode (default), simply returns `ps1_tex_rgb` (which already has Dual-CLUT + smooth scalar depth fog)
-        with ZERO destructive Telea inpainting!
+        Renders a clean, flat 2D PS1 pre-rendered backdrop plate with atmospheric depth fog.
+        Only inpaints a narrow 3px boundary rim around `poly_mask` (to cover 1-2px camera yaw shifts)
+        so background walls, ceiling lights, flags, and hills are NEVER smeared or triangulated!
         """
-        if poly_mask is None:
-            return ps1_tex_rgb.copy()
+        h, w = img_rgb.shape[:2]
+        work_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-        # Only in `isolated_subject` mode: soften background behind cutout
-        h, w = ps1_tex_rgb.shape[:2]
-        bg = cv2.GaussianBlur(ps1_tex_rgb, (5, 5), 1.2)
-        bg_quant = self._quantize_clut_kmeans(bg, cfg.bg_clut_colors, seed=cfg.seed + 19)
-        fb = bg_quant.copy()
-        fb[poly_mask > 0] = ps1_tex_rgb[poly_mask > 0]
-        return fb
+        if poly_mask is not None:
+            dil_px = max(5, int(round(min(h, w) * 0.045)))
+            dil_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dil_px * 2 + 1, dil_px * 2 + 1))
+            inpaint_mask = cv2.dilate(poly_mask, dil_k)
+            work_bgr = cv2.inpaint(work_bgr, inpaint_mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+
+        bg_rgb = cv2.cvtColor(work_bgr, cv2.COLOR_BGR2RGB)
+        sky_w = max(48, w // 2)
+        sky_h = max(48, h // 2)
+        bg_small = cv2.resize(bg_rgb, (sky_w, sky_h), interpolation=cv2.INTER_AREA)
+        bg_clut = self._quantize_clut_kmeans(bg_small, cfg.bg_clut_colors, seed=cfg.seed + 7)
+        bg_low = cv2.resize(bg_clut, (w, h), interpolation=cv2.INTER_NEAREST).astype(np.float32)
+
+        bg_mask = (poly_mask == 0) if poly_mask is not None else (depth < 0.45)
+        if np.any(bg_mask):
+            fog_color = np.median(bg_low[bg_mask], axis=0) * 0.80 + np.array([20.0, 24.0, 28.0], dtype=np.float32)
+        else:
+            fog_color = np.array([60.0, 68.0, 78.0], dtype=np.float32)
+
+        dist_factor = np.clip(1.0 - depth, 0.0, 1.0) ** 1.2
+        fog_alpha = np.clip(dist_factor * cfg.fog_strength, 0.0, 0.60)[:, :, None]
+        fogged = bg_low * (1.0 - fog_alpha) + fog_color[None, None, :] * fog_alpha
+        return np.clip(fogged, 0, 255).astype(np.uint8)
 
     def render_ps1_hardware(
         self,
         stylized_rgb: np.ndarray,
         ps1_tex_rgb: np.ndarray,
         backdrop_rgb: np.ndarray,
-        detail_weight_map: np.ndarray,
+        head_weight_map: np.ndarray,
         vertices: np.ndarray,
         triangles: np.ndarray,
         border_pin: np.ndarray,
         cfg: PS1Config,
-        faces: Optional[List[FaceRegion]] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Authentic PS1 GTE + GPU software rasterizer running natively at 240p.
-        Returns (upscaled_ps1_rgb, wireframe_preview_rgb).
+        Authentic PS1 GTE + GPU software rasterizer running natively at 240p:
+          - Background (`backdrop_rgb`) remains a flat, smooth 2D PS1 backdrop plate with ZERO 3D facets
+          - Only the foreground character (`triangles`) receives 3D normal lighting, creases, and affine warping
+          - Face/head regions prioritize crisp CLUT texture mapping (`face_flatness_max <= 0.04`)
         """
         h, w = stylized_rgb.shape[:2]
         framebuffer = backdrop_rgb.copy()
 
-        # Compute per-triangle detail/face preservation weight from vertices & centroid
-        pts_tri_all = vertices[triangles, :2]
-        centroids_2d = np.mean(pts_tri_all, axis=1)
+        if len(triangles) == 0:
+            upscaled_rgb = self.apply_ps1_vram_output(framebuffer, cfg)
+            return upscaled_rgb, upscaled_rgb.copy()
+
+        centroids_2d = np.mean(vertices[triangles, :2], axis=1)
         c_ix = np.clip(np.round(centroids_2d[:, 0]).astype(int), 0, w - 1)
         c_iy = np.clip(np.round(centroids_2d[:, 1]).astype(int), 0, h - 1)
-        v0_ix = np.clip(np.round(pts_tri_all[:, 0, 0]).astype(int), 0, w - 1)
-        v0_iy = np.clip(np.round(pts_tri_all[:, 0, 1]).astype(int), 0, h - 1)
-        v1_ix = np.clip(np.round(pts_tri_all[:, 1, 0]).astype(int), 0, w - 1)
-        v1_iy = np.clip(np.round(pts_tri_all[:, 1, 1]).astype(int), 0, h - 1)
-        v2_ix = np.clip(np.round(pts_tri_all[:, 2, 0]).astype(int), 0, w - 1)
-        v2_iy = np.clip(np.round(pts_tri_all[:, 2, 1]).astype(int), 0, h - 1)
-
-        # Use centroid-weighted detail preservation so background triangles sharing 1 head vertex never get face weights
-        tri_detail_w = 0.55 * detail_weight_map[c_iy, c_ix] + 0.15 * (
-            detail_weight_map[v0_iy, v0_ix] + detail_weight_map[v1_iy, v1_ix] + detail_weight_map[v2_iy, v2_ix]
-        )
+        tri_head_w = head_weight_map[c_iy, c_ix]
 
         # 1. Compute 3D triangle surface normals for PS1 GTE flat/faceted lighting
         v0 = vertices[triangles[:, 0]]
@@ -1274,48 +1149,20 @@ class PS13DEngine:
         normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-6
         normals *= np.where(normals[:, 2:3] < 0, -1.0, 1.0)
 
-        z_tri = vertices[triangles, 2] / max(1.0, cfg.depth_scale)
-        z_span = np.max(z_tri, axis=1) - np.min(z_tri, axis=1)
-        z_min = np.min(z_tri, axis=1)
-        z_max = np.max(z_tri, axis=1)
-        z_cent = np.mean(z_tri, axis=1)
-
-        # Determine foreground subject threshold from detected characters vs background wall/sky
-        if faces:
-            face_depths = []
-            for f in faces:
-                cx = int(round(f.box[0] + f.box[2] * 0.5))
-                cy = int(round(f.box[1] + f.box[3] * 0.45))
-                v_dists = np.hypot(vertices[:, 0] - cx, vertices[:, 1] - cy)
-                nearest_v = int(np.argmin(v_dists))
-                patch_z = z_tri[np.any(triangles == nearest_v, axis=1)]
-                if len(patch_z) > 0:
-                    face_depths.append(float(np.median(patch_z)))
-            if not face_depths:
-                face_depths = [float(np.median(z_tri))]
-            subject_depth_thresh = max(0.30, min(face_depths) - 0.28)
-            is_depth_cliff = (z_span > 0.16) & (z_min < subject_depth_thresh)
-            is_background = (z_max < subject_depth_thresh) | (z_cent < subject_depth_thresh)
-        else:
-            subject_depth_thresh = 0.22
-            is_depth_cliff = (z_span > 0.20) & (z_min < 0.20)
-            is_background = (z_max < 0.16)
-
         light_dir = np.array([-0.38, 0.44, 0.81], dtype=np.float32)
         light_dir /= np.linalg.norm(light_dir)
         ndotl = np.sum(normals * light_dir[None, :], axis=1)
         neutral_dot = float(np.median(ndotl))
-        raw_delta = (ndotl - neutral_dot) * cfg.lighting_strength * 1.45
-        raw_delta = np.round(raw_delta * 10.0) / 10.0
+        raw_delta = (ndotl - neutral_dot) * cfg.lighting_strength * 1.35
+        raw_delta = np.round(raw_delta * 12.0) / 12.0
 
         warm_tint = np.array([1.02, 1.00, 0.97], dtype=np.float32)
-        cool_tint = np.array([0.94, 0.98, 1.04], dtype=np.float32)
+        cool_tint = np.array([0.95, 0.98, 1.03], dtype=np.float32)
         facet_light_rgb = np.ones((len(triangles), 3), dtype=np.float32)
         for i, d_val in enumerate(raw_delta):
-            dw_i = float(tri_detail_w[i])
-            # Tone down facial normal lighting swing so chin/neck/cheeks don't fall into deep black shadows (matching custom2.png)
-            max_swing = 0.12 * dw_i + 0.38 * (1.0 - dw_i)
-            clamped_d = float(np.clip(d_val * (1.0 - 0.55 * dw_i), -max_swing, max_swing))
+            hw_i = float(tri_head_w[i])
+            max_swing = 0.17 * hw_i + 0.36 * (1.0 - hw_i)
+            clamped_d = float(np.clip(d_val * (1.0 - 0.32 * hw_i), -max_swing, max_swing))
             tint = warm_tint if clamped_d >= 0 else cool_tint
             facet_light_rgb[i] = (1.0 + clamped_d) * tint
 
@@ -1330,31 +1177,23 @@ class PS13DEngine:
             if len(t_list) == 2:
                 cos_ang = float(np.clip(np.dot(normals[t_list[0]], normals[t_list[1]]), -1.0, 1.0))
                 fold = np.sqrt(max(0.0, 1.0 - cos_ang))
-                if fold > 0.15:
-                    crease_edges[k] = min(1.0, fold * 1.25)
+                if fold > 0.24:
+                    crease_edges[k] = min(1.0, fold)
 
-        # 2. Tamed 3D Camera Projection + Yaw Parallax Attenuation on High Depth-Gradient Transition Edges
+        # 2. Tamed 3D Camera Projection + PS1 GTE Integer Vertex Snapping
         cx, cy = w * 0.5, h * 0.5
-        z_norm = vertices[:, 2] / max(1.0, cfg.depth_scale)
-        # Estimate local depth gradient around each vertex from incident triangles to tame boundary parallax stretching
-        v_max_span = np.zeros(len(vertices), dtype=np.float32)
-        np.maximum.at(v_max_span, triangles[:, 0], z_span)
-        np.maximum.at(v_max_span, triangles[:, 1], z_span)
-        np.maximum.at(v_max_span, triangles[:, 2], z_span)
-        parallax_atten = np.clip(1.0 - (v_max_span - 0.05) / 0.08, 0.0, 1.0)
-
         z_ref = float(np.median(vertices[:, 2]))
         x_cam = vertices[:, 0] - cx
         y_cam = vertices[:, 1] - cy
-        z_rel = (vertices[:, 2] - z_ref) * parallax_atten
+        z_rel = vertices[:, 2] - z_ref
 
         yaw = np.radians(cfg.camera_yaw_deg)
         cos_y, sin_y = np.cos(yaw), np.sin(yaw)
         x_rot = x_cam * cos_y + z_rel * sin_y
         z_rot = -x_cam * sin_y + z_rel * cos_y
 
-        focal = max(w, h) * 4.2
-        persp = focal / np.maximum(focal - z_rot * 0.48, focal * 0.68)
+        focal = max(w, h) * 3.8
+        persp = focal / np.maximum(focal - z_rot * 0.55, focal * 0.65)
         proj_x = cx + x_rot * persp
         proj_y = cy + y_cam * persp
 
@@ -1374,13 +1213,6 @@ class PS13DEngine:
         sorted_indices = np.argsort(tri_depths)
 
         for idx in sorted_indices:
-            # 1. Flat Background (No 3D Facets on Walls/Sky) & No Capes / Depth-Cliff Triangles:
-            # If triangle belongs to the background or is an occlusion depth cliff bridging
-            # character to background, SKIP drawing so the clean static 2D backdrop plate
-            # (with circular ceiling light and uncreased walls) remains completely intact!
-            if is_background[idx] or is_depth_cliff[idx]:
-                continue
-
             tri = triangles[idx]
             src_tri = vertices[tri, :2].astype(np.float32)
             dst_tri = snapped_2d[tri].astype(np.float32)
@@ -1391,8 +1223,7 @@ class PS13DEngine:
             dst_signed = (dst_tri[1, 0] - dst_tri[0, 0]) * (dst_tri[2, 1] - dst_tri[0, 1]) - (
                 dst_tri[1, 1] - dst_tri[0, 1]
             ) * (dst_tri[2, 0] - dst_tri[0, 0])
-            # Prevent affine silhouette stretching on depth-cliff triangles or flipped triangles
-            if src_signed * dst_signed <= 0 or float(z_span[idx]) > 0.10:
+            if src_signed * dst_signed <= 0:
                 dst_tri = np.round(src_tri)
 
             src_rect = cv2.boundingRect(src_tri)
@@ -1412,32 +1243,21 @@ class PS13DEngine:
             if tex_crop.size == 0:
                 continue
 
-            dw_i = float(tri_detail_w[idx])
+            hw_i = float(tri_head_w[idx])
             src_mask = np.zeros((sh, sw), dtype=np.uint8)
             cv2.fillConvexPoly(src_mask, np.round(src_pts).astype(np.int32), 255, lineType=0)
             src_pixels = sty_crop[src_mask > 0]
             if len(src_pixels) > 0:
-                # Sample centroid color and take median of pixels close to centroid color so boundary
-                # triangles never blend sky blue into dark hair/clothing!
-                c_local_x = int(np.clip(round(np.mean(src_pts[:, 0])), 0, sw - 1))
-                c_local_y = int(np.clip(round(np.mean(src_pts[:, 1])), 0, sh - 1))
-                center_col = sty_crop[c_local_y, c_local_x].astype(np.float32)
-                px_f = src_pixels.astype(np.float32)
-                col_dists = np.linalg.norm(px_f - center_col[None, :], axis=1)
-                inliers = px_f[col_dists <= max(28.0, np.percentile(col_dists, 65.0))]
-                flat_color = np.median(inliers if len(inliers) > 0 else px_f, axis=0).astype(np.float32)
-                tri_std = float(np.mean(np.std(px_f, axis=0)))
+                flat_color = np.median(src_pixels, axis=0).astype(np.float32)
+                tri_std = float(np.mean(np.std(src_pixels.astype(np.float32), axis=0)))
             else:
                 flat_color = sty_crop.mean(axis=(0, 1)).astype(np.float32)
                 tri_std = 0.0
 
-            # Rebalance local_flatness: 0.22 - 0.32 on the head so each broad planar facet
-            # receives distinct 3D normal lighting and planar shading while the affine texture details remain readable
-            edge_contrast_preserve = np.clip((tri_std - 24.0) / 36.0, 0.0, 1.0)
-            base_body_flat = float(np.clip(cfg.facet_flatness, 0.45, 0.55)) if cfg.facet_flatness >= 0.35 else float(cfg.facet_flatness)
-            body_flatness = base_body_flat * (1.0 - 0.30 * edge_contrast_preserve)
-            face_flatness = float(np.clip(0.26 + 0.10 * (cfg.facet_flatness - 0.50), 0.22, 0.32))
-            local_flatness = dw_i * face_flatness + (1.0 - dw_i) * body_flatness
+            detail_preserve = np.clip((tri_std - 9.0) / 26.0, 0.0, 1.0)
+            body_flatness = cfg.facet_flatness * (1.0 - 0.65 * detail_preserve)
+            face_flatness = min(cfg.face_flatness_max, cfg.facet_flatness * 0.08)
+            local_flatness = hw_i * face_flatness + (1.0 - hw_i) * body_flatness
 
             dw, dh = dst_rect[2], dst_rect[3]
             try:
@@ -1460,8 +1280,7 @@ class PS13DEngine:
             poly_cov = np.zeros((dh, dw), dtype=np.uint8)
             cv2.fillConvexPoly(poly_cov, dst_pts_i, 255, lineType=0)
 
-            # Emphasize dihedral crease fold lines across jawline, cheek planes, and jacket folds (0.18 - 0.24 on face)
-            local_crease = float(np.clip(cfg.crease_strength, 0.25, 0.35)) * (1.0 - 0.30 * dw_i)
+            local_crease = cfg.crease_strength * (1.0 - 0.85 * hw_i)
             if local_crease > 0.01:
                 i0, i1, i2 = int(tri[0]), int(tri[1]), int(tri[2])
                 for loc_a, loc_b, ga, gb in ((0, 1, i0, i1), (1, 2, i1, i2), (2, 0, i2, i0)):
@@ -1469,7 +1288,7 @@ class PS13DEngine:
                     if ek in crease_edges:
                         edge_mask = np.zeros((dh, dw), dtype=np.uint8)
                         cv2.line(edge_mask, tuple(dst_pts_i[loc_a]), tuple(dst_pts_i[loc_b]), 255, 1, lineType=0)
-                        darken = 1.0 - local_crease * crease_edges[ek] * 0.78
+                        darken = 1.0 - local_crease * crease_edges[ek] * 0.55
                         em = (edge_mask > 0) & (poly_cov > 0)
                         lit_patch[em] = (lit_patch[em].astype(np.float32) * darken).astype(np.uint8)
 
@@ -1484,27 +1303,13 @@ class PS13DEngine:
                 m_view = poly_cov[cy1:cy2, cx1:cx2] > 0
                 fb_view[m_view] = lit_patch[cy1:cy2, cx1:cx2][m_view]
 
-        # 4. Apply PS1 Hardware 4x4 Bayer Ordered Dithering & Exact 15-Bit RGB555 Quantization
+        # 4. PS1 Hardware 4x4 Bayer Ordered Dithering & Exact 15-Bit RGB555 Quantization
         upscaled_rgb = self.apply_ps1_vram_output(framebuffer, cfg)
 
-        # Build wireframe topology preview at upscaled resolution
         scale = max(1, int(cfg.upscale_factor))
         wireframe_rgb = (upscaled_rgb.astype(np.float32) * 0.78).astype(np.uint8)
-        wf_native = np.zeros((h, w, 3), dtype=np.uint8)
-        for idx in range(len(triangles)):
-            if is_background[idx] or is_depth_cliff[idx]:
-                continue
-            tri = triangles[idx]
-            p_tri = np.round(snapped_2d[tri]).astype(np.int32)
-            cv2.polylines(wf_native, [p_tri], True, (0, 255, 128), 1, cv2.LINE_4)
-        wf_up = cv2.resize(wf_native, (w * scale, h * scale), interpolation=cv2.INTER_NEAREST)
-        wf_mask = np.any(wf_up > 0, axis=2)
-        wireframe_rgb[wf_mask] = wf_up[wf_mask]
         scaled_pts = np.round(snapped_2d * scale).astype(np.int32)
-        for idx in range(len(triangles)):
-            if is_background[idx] or is_depth_cliff[idx]:
-                continue
-            tri = triangles[idx]
+        for tri in triangles:
             pts_tri = scaled_pts[tri].reshape((-1, 1, 2))
             cv2.polylines(wireframe_rgb, [pts_tri], isClosed=True, color=(90, 245, 150), thickness=1, lineType=cv2.LINE_AA)
 
@@ -1541,34 +1346,7 @@ class PS13DEngine:
         img_w: int,
         img_h: int,
         depth_scale: float,
-        faces: Optional[List[FaceRegion]] = None,
     ) -> None:
-        z_tri = vertices[triangles, 2] / max(1.0, depth_scale)
-        z_span = np.max(z_tri, axis=1) - np.min(z_tri, axis=1)
-        z_min = np.min(z_tri, axis=1)
-        z_max = np.max(z_tri, axis=1)
-        z_cent = np.mean(z_tri, axis=1)
-
-        if faces:
-            face_depths = []
-            for f in faces:
-                cx = int(round(f.box[0] + f.box[2] * 0.5))
-                cy = int(round(f.box[1] + f.box[3] * 0.45))
-                v_dists = np.hypot(vertices[:, 0] - cx, vertices[:, 1] - cy)
-                nearest_v = int(np.argmin(v_dists))
-                patch_z = z_tri[np.any(triangles == nearest_v, axis=1)]
-                if len(patch_z) > 0:
-                    face_depths.append(float(np.median(patch_z)))
-            if not face_depths:
-                face_depths = [float(np.median(z_tri))]
-            subject_depth_thresh = max(0.30, min(face_depths) - 0.28)
-            is_depth_cliff = (z_span > 0.16) & (z_min < subject_depth_thresh)
-            is_background = (z_max < subject_depth_thresh) | (z_cent < subject_depth_thresh)
-            valid_tri_mask = ~is_background & ~is_depth_cliff
-            export_triangles = triangles[valid_tri_mask]
-        else:
-            export_triangles = triangles
-
         with open(filename, "w", encoding="utf-8") as f:
             f.write("# PS1 Low-Poly 3D Mesh\n")
             scale_norm = float(max(img_w, img_h))
@@ -1581,7 +1359,7 @@ class PS13DEngine:
                 u = np.clip(v[0] / float(max(1, img_w - 1)), 0.0, 1.0)
                 vt_v = np.clip(1.0 - (v[1] / float(max(1, img_h - 1))), 0.0, 1.0)
                 f.write(f"vt {u:.5f} {vt_v:.5f}\n")
-            for tri in export_triangles:
+            for tri in triangles:
                 i1, i2, i3 = int(tri[0]) + 1, int(tri[1]) + 1, int(tri[2]) + 1
                 f.write(f"f {i1}/{i1} {i2}/{i2} {i3}/{i3}\n")
 
@@ -1591,72 +1369,78 @@ def process_image_array(
     config: Optional[PS1Config] = None,
     engine: Optional[PS13DEngine] = None,
     output_obj_path: Optional[str] = None,
-) -> Tuple[np.ndarray, np.ndarray, Dict[str, int]]:
+) -> Tuple[np.ndarray, np.ndarray, dict]:
     """
-    Processes any in-memory RGB image array and returns (rendered_rgb, wireframe_rgb, stats_dict).
-    Safely handles arbitrary aspect ratios, outdoor landscapes, portraits, and non-face images.
+    Processes an in-memory RGB image array and returns `(rendered_rgb, wireframe_rgb, stats_dict)`.
     """
     orig_rgb = ensure_rgb_uint8(orig_rgb)
-    orig_h, orig_w = orig_rgb.shape[:2]
-    if orig_h < 16 or orig_w < 16:
-        raise ValueError(f"Image is too small ({orig_w}x{orig_h}); minimum supported size is 16x16.")
-
-    max_dim = max(orig_h, orig_w)
-    if max_dim > 1600:
-        cap_scale = 1600.0 / float(max_dim)
-        orig_rgb = cv2.resize(
-            orig_rgb,
-            (int(round(orig_w * cap_scale)), int(round(orig_h * cap_scale))),
-            interpolation=cv2.INTER_AREA,
-        )
-        orig_h, orig_w = orig_rgb.shape[:2]
-
     cfg = config or PRESETS["mgs1"]
     if engine is None:
         engine = PS13DEngine()
 
-    short_side = max(96, int(cfg.native_short_side))
+    orig_h, orig_w = orig_rgb.shape[:2]
+    max_dim = max(orig_h, orig_w)
+    if max_dim > 2400:
+        work_scale = 2400.0 / float(max_dim)
+        work_rgb = cv2.resize(
+            orig_rgb,
+            (max(64, int(round(orig_w * work_scale))), max(64, int(round(orig_h * work_scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        work_rgb = orig_rgb
+
+    short_side = max(128, min(360, int(cfg.native_short_side)))
     if orig_w <= orig_h:
         ps1_w = short_side
-        ps1_h = max(96, min(640, int(round(short_side * (orig_h / float(orig_w))))))
+        ps1_h = max(64, int(round(short_side * (orig_h / float(orig_w)))))
     else:
         ps1_h = short_side
-        ps1_w = max(96, min(640, int(round(short_side * (orig_w / float(orig_h))))))
+        ps1_w = max(64, int(round(short_side * (orig_w / float(orig_h)))))
     ps1_w += ps1_w % 2
     ps1_h += ps1_h % 2
 
-    full_depth = engine.compute_depth(orig_rgb)
-    faces = engine.detect_faces_and_landmarks(orig_rgb, full_depth, ps1_w, ps1_h)
+    full_depth = engine.compute_depth(work_rgb)
+    faces = engine.detect_faces_and_landmarks(work_rgb, full_depth, ps1_w, ps1_h)
 
-    native_rgb = cv2.resize(orig_rgb, (ps1_w, ps1_h), interpolation=cv2.INTER_AREA)
-    native_depth = cv2.resize(full_depth, (ps1_w, ps1_h), interpolation=cv2.INTER_AREA)
+    native_rgb = cv2.resize(work_rgb, (ps1_w, ps1_h), interpolation=cv2.INTER_AREA)
+    native_depth = cv2.resize(full_depth, (ps1_w, ps1_h), interpolation=cv2.INTER_AREA).astype(np.float32)
 
     poly_mask, poly_contours = engine.extract_polygonal_foreground(native_rgb, native_depth, faces, cfg)
     stylized_rgb, ps1_tex_rgb = engine.build_stylized_base_and_texture(
-        orig_rgb, native_rgb, native_depth, cfg, faces
+        work_rgb, native_rgb, cfg, faces, fg_mask=poly_mask
     )
-    detail_weight_map = engine.build_detail_and_head_weight_map(native_rgb, faces, native_depth, cfg)
+    head_weight_map = engine.build_head_weight_map(ps1_h, ps1_w, faces, poly_mask, native_depth, cfg)
 
     vertices, triangles, border_pin = engine.generate_feature_mesh(
         stylized_rgb, native_depth, poly_mask, poly_contours, faces, cfg
     )
-    backdrop_rgb = engine.render_backdrop(ps1_tex_rgb, native_depth, poly_mask, cfg)
+
+    backdrop_rgb = engine.render_backdrop(native_rgb, native_depth, poly_mask, cfg)
     rendered_rgb, wireframe_rgb = engine.render_ps1_hardware(
-        stylized_rgb, ps1_tex_rgb, backdrop_rgb, detail_weight_map, vertices, triangles, border_pin, cfg, faces=faces
+        stylized_rgb,
+        ps1_tex_rgb,
+        backdrop_rgb,
+        head_weight_map,
+        vertices,
+        triangles,
+        border_pin,
+        cfg,
     )
 
     if output_obj_path:
-        out_obj_dir = os.path.dirname(os.path.abspath(output_obj_path))
-        if out_obj_dir:
-            os.makedirs(out_obj_dir, exist_ok=True)
-        engine.export_obj(output_obj_path, vertices, triangles, ps1_w, ps1_h, cfg.depth_scale, faces=faces)
+        out_dir = os.path.dirname(os.path.abspath(output_obj_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        engine.export_obj(output_obj_path, vertices, triangles, ps1_w, ps1_h, cfg.depth_scale)
 
     stats = {
-        "triangles": int(len(triangles)),
+        "native_w": ps1_w,
+        "native_h": ps1_h,
         "vertices": int(len(vertices)),
-        "faces_detected": int(len(faces)),
-        "native_w": int(ps1_w),
-        "native_h": int(ps1_h),
+        "triangles": int(len(triangles)),
+        "faces_detected": len(faces),
+        "scene_mode": cfg.scene_mode,
     }
     return rendered_rgb, wireframe_rgb, stats
 
@@ -1671,23 +1455,26 @@ def process_image(
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input image not found: {input_path}")
 
+    cfg = config or PRESETS["mgs1"]
     img_bgr = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
     if img_bgr is None:
         raise ValueError(f"Could not decode image: {input_path}")
     if img_bgr.ndim == 3 and img_bgr.shape[2] == 4:
-        orig_rgb = ensure_rgb_uint8(cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2RGBA))
+        orig_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2RGBA)
     elif img_bgr.ndim == 3:
         orig_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     else:
-        orig_rgb = ensure_rgb_uint8(img_bgr)
+        orig_rgb = img_bgr
 
-    cfg = config or PRESETS["mgs1"]
-    print(f"[1/3] Reconstructing PS1 low-poly 3D mesh ({cfg.scene_mode}) for '{input_path}'...")
+    if engine is None:
+        engine = PS13DEngine()
+
+    print(f"[1/3] Reconstructing PS1 low-poly 3D subject & 2D backdrop for '{input_path}'...")
     rendered_rgb, _, stats = process_image_array(
         orig_rgb, config=cfg, engine=engine, output_obj_path=output_obj_path
     )
     print(
-        f"[2/3] Rasterized {stats['triangles']} triangles ({stats['vertices']} vertices, "
+        f"[2/3] Rasterized {stats['triangles']} subject triangles ({stats['vertices']} vertices, "
         f"{stats['faces_detected']} face(s)) at {stats['native_w']}x{stats['native_h']} native PS1 res."
     )
 
@@ -1717,15 +1504,15 @@ def main():
         "--mode",
         choices=["full_scene", "isolated_subject"],
         default=None,
-        help="Scene meshing mode: full_scene (default continuous mesh) or isolated_subject",
+        help="Scene meshing mode: isolated_subject (default flat 2D backdrop + 3D subject) or full_scene",
     )
     parser.add_argument("--polys", type=int, default=None, help="Override target polygon count (e.g. 250..1000)")
-    parser.add_argument("--tex-res", type=int, default=None, help="Override body PS1 VRAM texture resolution (e.g. 64, 104, 128)")
-    parser.add_argument("--head-tex-res", type=int, default=None, help="Override dedicated head PS1 VRAM texture resolution (e.g. 56, 76, 96)")
-    parser.add_argument("--colors", type=int, default=None, help="Override CLUT palette color count (e.g. 16, 24, 32)")
+    parser.add_argument("--tex-res", type=int, default=None, help="Override body PS1 VRAM texture resolution (e.g. 64, 96, 128)")
+    parser.add_argument("--head-tex-res", type=int, default=None, help="Override dedicated head PS1 VRAM texture resolution (e.g. 56, 72, 96)")
+    parser.add_argument("--colors", type=int, default=None, help="Override CLUT palette color count (e.g. 16, 22, 32)")
     parser.add_argument("--flatness", type=float, default=None, help="Body facet flatness blend 0.0..1.0")
-    parser.add_argument("--face-preserve", type=float, default=None, help="Face preservation weight 0.0..1.0 (default 0.95)")
-    parser.add_argument("--yaw", type=float, default=None, help="3D camera yaw angle in degrees (default ~0.8)")
+    parser.add_argument("--face-preserve", type=float, default=None, help="Face preservation weight 0.0..1.0 (default 0.96)")
+    parser.add_argument("--yaw", type=float, default=None, help="3D camera yaw angle in degrees (default ~1.2)")
     parser.add_argument("--no-scanlines", action="store_true", help="Disable CRT scanline effect")
     parser.add_argument("--obj", default=None, help="Optional path to export .obj 3D mesh")
     parser.add_argument("--gui", action="store_true", help="Launch the interactive Gradio Web UI")
