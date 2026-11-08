@@ -1,0 +1,13 @@
+# Tüm popüler resim formatlarını yoksay
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.webp
+*.ico
+*.tiff
+*.raw
+*.heic
+*.avif
