@@ -288,7 +288,7 @@ class PS13DEngine:
         det_gray = cv2.cvtColor(cv2.resize(orig_rgb, (det_w, det_h), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY)
         det_gray_eq = cv2.equalizeHist(det_gray)
 
-        min_face = max(28, int(round(min(det_w, det_h) * 0.14)))
+        min_face = max(20, int(round(min(det_w, det_h) * 0.05)))
         raw_boxes = []
         for gray_src in (det_gray, det_gray_eq):
             for cascade, scale_f, min_n in (
@@ -333,6 +333,25 @@ class PS13DEngine:
         sx = ps1_w / float(det_w)
         sy = ps1_h / float(det_h)
         faces: List[FaceRegion] = []
+
+        filtered_boxes = []
+        for bx, by, bw, bh in merged_boxes:
+            roi_h = int(round(bh * 0.62))
+            face_roi = det_gray_eq[by : by + roi_h, bx : bx + bw]
+            min_eye = max(6, int(round(bw * 0.13)))
+            max_eye = int(round(bw * 0.42))
+            eyes = (
+                self.eye_cascade.detectMultiScale(
+                    face_roi, scaleFactor=1.06, minNeighbors=3, minSize=(min_eye, min_eye), maxSize=(max_eye, max_eye)
+                )
+                if not self.eye_cascade.empty() and min_eye < max_eye
+                else ()
+            )
+            # If box is in lower half of image (e.g. knees/hips) and has 0 eyes, reject false positive!
+            if len(eyes) == 0 and by > (det_h * 0.45):
+                continue
+            filtered_boxes.append((bx, by, bw, bh))
+        merged_boxes = filtered_boxes if filtered_boxes else merged_boxes[:1]
 
         for bx, by, bw, bh in merged_boxes:
             roi_h = int(round(bh * 0.62))
@@ -838,6 +857,19 @@ class PS13DEngine:
                 ix_l, iy_l = int(round(lm[0])), int(round(lm[1]))
                 if poly_mask is None or poly_mask[iy_l, ix_l] > 0:
                     _try_add_point(lm[0], lm[1], face_min_d)
+
+            # Sample 5 natural crown arch points along true hat/beanie/hair contour
+            if poly_mask is not None:
+                mask_n = cv2.resize(poly_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                for u_arch in (0.18, 0.36, 0.50, 0.64, 0.82):
+                    col_x = int(np.clip(round(fx + u_arch * fw), 0, w - 1))
+                    col_ys = np.where(mask_n[:max(1, int(round(fy + fh * 0.15))), col_x] > 0)[0]
+                    if len(col_ys) > 0:
+                        top_y = float(col_ys.min())
+                        min_lm_y = float(np.min(face.landmarks[:, 1])) if len(face.landmarks) > 0 else fy
+                        # Only add extra crown arch vertices if hat/beanie/hair extends significantly above face cage
+                        if top_y < min_lm_y - 7.5:
+                            _try_add_point(float(col_x), top_y, min_dist * 0.55)
 
             cx = int(round(fx + fw * 0.5))
             cy = int(round(fy + fh * 0.48))
