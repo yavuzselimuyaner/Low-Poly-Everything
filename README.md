@@ -30,6 +30,22 @@ Below are side-by-side comparisons demonstrating where the engine achieves its a
 
 ---
 
+## 🎯 Target Aesthetic References (1998 Era)
+
+The engine aims to match the authentic polygonal density, facet edge flow, and affine texture warping seen in 1998 PlayStation 1 character models:
+
+| Metal Gear Solid (1998) | Crash Bandicoot Low-Poly Wireframe |
+| :---: | :---: |
+| ![MGS1 Characters](examples/references/target_mgs1_roster.jpg) | ![Crash Wireframe](examples/references/target_crash_wireframe.jpg) |
+| *~350–500 triangles per model, distinct facial planes, cylindrical limb meshes* | *Economical low-poly topology with clean limb joints and mouth cavities* |
+
+| Silent Hill / Retro Character | Modern Demake (PS1 Death Stranding) |
+| :---: | :---: |
+| ![Silent Hill Character](examples/references/target_silent_hill_character.jpg) | ![Death Stranding PS1](examples/references/target_death_stranding_ps1.jpg) |
+| *Blocky clothing folds, affine texture warping, 15-bit color palette* | *Chunky facet shading, detached limbs, and low-res VRAM texture mapping* |
+
+---
+
 ## 🏛️ Pipeline Architecture
 
 ```mermaid
@@ -140,6 +156,30 @@ python ps1_3d_engine.py my_photo.jpg -o ps1_render.png --polys 350 --flatness 0.
 | `--no-scanlines` | `flag` | `False` | Disable CRT scanline emulation pass |
 | `--obj` | `str` | `None` | Export reconstructed 3D mesh as `.obj` |
 | `--gui` | `flag` | `False` | Launch interactive Gradio Web UI |
+
+---
+
+## 📁 Repository Structure & Included Examples
+
+```text
+ps1/
+├── ps1_3d_engine.py          # Core 3D reconstruction, triangulation & PS1 rasterizer
+├── app.py                    # Interactive Gradio Web UI with real-time controls
+├── PS1_ENGINE_STUDY_GUIDE.md # In-depth technical math & graphics guide
+├── README.md                 # Project documentation & community roadmap
+├── foto2.jpg                 # Default golden reference portrait photo
+├── 2.png                     # Verified 1998 PS1 reference output (target2.png)
+└── examples/                 # Curated sample images and target aesthetic references
+    ├── sample_portrait.jpg       # Clean portrait input photo
+    ├── sample_portrait_ps1.png   # Rendered PS1 portrait output
+    ├── sample_action.jpg         # Full-body tactical action pose
+    ├── sample_duo.jpg            # Two-character scene
+    └── references/               # Target 1998 retro game graphics references
+        ├── target_mgs1_roster.jpg
+        ├── target_crash_wireframe.jpg
+        ├── target_silent_hill_character.jpg
+        └── target_death_stranding_ps1.jpg
+```
 
 ---
 
