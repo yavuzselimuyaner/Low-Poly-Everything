@@ -11,3 +11,8 @@
 *.raw
 *.heic
 *.avif
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
