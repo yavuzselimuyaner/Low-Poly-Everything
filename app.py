@@ -121,7 +121,7 @@ def build_interface() -> gr.Blocks:
     with gr.Blocks(title="PS1 Low-Poly 3D Engine") as demo:
         gr.Markdown(
             """
-            # 🎮 PS1 Low-Poly 3D Character & Scene Engine
+            # PS1 Low-Poly 3D Character & Scene Engine
             Recreate portraits, outdoor photos, characters, and scenes in authentic **1998 PlayStation 1 (32-bit)** low-poly 3D style:
             Depth-Anything-V2 / MiDaS 3D continuous depth meshing, anatomical face & cranial cage preservation, Dual-CLUT VRAM textures,
             smooth scalar distance fog, 4x4 hardware Bayer dithering, and 15-bit RGB555 color quantization.
